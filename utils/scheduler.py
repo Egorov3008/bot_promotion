@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,7 +13,7 @@ from texts.messages import WINNER_ANNOUNCEMENT_TEMPLATE, NO_PARTICIPANTS_TEMPLAT
 from utils.datetime_utils import format_datetime
 from utils.keyboards import get_participate_keyboard
 
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(timezone=timezone.utc)
 
 # Словарь для хранения настроек напоминаний по розыгрышам
 REMINDER_SETTINGS = {
@@ -33,7 +33,7 @@ async def setup_scheduler(bot):
     # Планируем все активные розыгрыши
     active_giveaways = await get_active_giveaways()
     for giveaway in active_giveaways:
-        if giveaway.end_time > datetime.utcnow():
+        if giveaway.end_time > datetime.now(timezone.utc):
             schedule_giveaway_finish(bot, giveaway.id, giveaway.end_time)
 
             # Восстанавливаем настройки напоминаний (если были сохранены в БД)
@@ -81,7 +81,7 @@ def schedule_giveaway_finish(bot, giveaway_id: int, end_time: datetime):
 
 def schedule_reminders(bot, giveaway):
     """Планирование многоуровневых напоминаний"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     duration = giveaway.end_time - now
 
     # Настройки напоминаний
@@ -150,7 +150,7 @@ async def send_reminder(bot, giveaway_id: int, level: str):
         return
 
     # Не отправляем, если розыгрыш закончился
-    if giveaway.end_time <= datetime.utcnow():
+    if giveaway.end_time <= datetime.now(timezone.utc):
         return
 
     # Формируем текст

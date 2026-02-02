@@ -307,7 +307,7 @@ async def count_finished_giveaways() -> int:
 async def delete_finished_older_than(days: int) -> int:
     """Удаляет из базы розыгрыши, завершенные более чем days дней назад. Возвращает кол-во удаленных розыгрышей.
     Удаляются также их участники и победители."""
-    threshold = datetime.utcnow() - timedelta(days=days)
+    threshold = datetime.now(timezone.utc) - timedelta(days=days)
     async with async_session() as session:
         # Найдем id таких розыгрышей
         result = await session.execute(

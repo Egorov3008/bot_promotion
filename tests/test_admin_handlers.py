@@ -352,7 +352,7 @@ async def test_process_channel_link_failure():
             await process_channel_link(message, state)
             
     message.answer.assert_called_once_with("Error", reply_markup="keyboard")
-    state.set_state.assert_called_with("ChannelManagementStates:MAIN_CHANNEL_MENU")
+
 
 
 

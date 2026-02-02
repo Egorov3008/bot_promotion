@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, patch
 from aiogram.types import CallbackQuery, Message, Update
 from aiogram.fsm.context import FSMContext
 
-from handlers.basic_handlers import router, get_participants_count, get_giveaway, update_giveaway_message_id, is_admin
+from handlers.basic_handlers import router, get_participants_count, get_giveaway, update_giveaway_message_id, is_admin, \
+    cmd_start, cmd_clear, cmd_admin, callback_main_menu, callback_participate, handle_unknown_message
+
 
 def create_message(text: str = None, command: str = None):
     message = AsyncMock(spec=Message)
@@ -13,7 +15,10 @@ def create_message(text: str = None, command: str = None):
     message.answer = AsyncMock()
     message.bot = AsyncMock()
     message.message_id = 123
+    message.chat = AsyncMock()
     message.chat.id = 456
+    message.from_user = AsyncMock()
+    message.from_user.id = 123
     return message
 
 def create_callback_query(data: str):
@@ -39,8 +44,8 @@ def test_router():
     """
     assert router is not None
 
-
-def test_cmd_start_admin():
+@pytest.mark.asyncio
+async def test_cmd_start_admin():
     """
     Тест для проверки cmd_start для администратора.
     """
@@ -48,13 +53,14 @@ def test_cmd_start_admin():
     state = create_state()
     
     with patch("handlers.basic_handlers.is_admin", return_value=True):
-        cmd_start(message, state)
+        await cmd_start(message, state)
         
     message.answer.assert_called_once()
     assert "администратор" in message.answer.call_args[0][0]
 
 
-def test_cmd_start_user():
+@pytest.mark.asyncio
+async def test_cmd_start_user():
     """
     Тест для проверки cmd_start для обычного пользователя.
     """
@@ -62,26 +68,28 @@ def test_cmd_start_user():
     state = create_state()
     
     with patch("handlers.basic_handlers.is_admin", return_value=False):
-        cmd_start(message, state)
+        await cmd_start(message, state)
         
     message.answer.assert_called_once()
     assert "Добро пожаловать!" in message.answer.call_args[0][0]
 
 
-def test_cmd_clear():
+@pytest.mark.asyncio
+async def test_cmd_clear():
     """
     Тест для проверки cmd_clear.
     """
     message = create_message()
     message.bot.delete_message = AsyncMock()
     
-    with patch("handlers.basic_handlers.MAX_DELETE_MESSAGES", 100):
-        cmd_clear(message)
-        
+    await cmd_clear(message)
+    
+    # Проверяем, что попытка удалить 101 сообщение (от message_id - 100 до message_id)
     assert message.bot.delete_message.call_count == 101
 
 
-def test_cmd_admin():
+@pytest.mark.asyncio
+async def test_cmd_admin():
     """
     Тест для проверки cmd_admin.
     """
@@ -90,7 +98,7 @@ def test_cmd_admin():
     
     with patch.dict("handlers.basic_handlers.MESSAGES", {"admin_main_menu": "Menu"}):
         with patch("handlers.basic_handlers.get_main_admin_keyboard", return_value="keyboard"):
-            cmd_admin(message, state)
+            await cmd_admin(message, state)
             
     state.clear.assert_called_once()
     message.answer.assert_called_once_with(
@@ -99,7 +107,8 @@ def test_cmd_admin():
     )
 
 
-def test_callback_main_menu():
+@pytest.mark.asyncio
+async def test_callback_main_menu():
     """
     Тест для проверки callback_main_menu.
     """
@@ -108,7 +117,7 @@ def test_callback_main_menu():
     
     with patch.dict("handlers.basic_handlers.MESSAGES", {"admin_main_menu": "Menu"}):
         with patch("handlers.basic_handlers.get_main_admin_keyboard", return_value="keyboard"):
-            callback_main_menu(callback, state)
+            await callback_main_menu(callback, state)
             
     state.clear.assert_called_once()
     callback.message.edit_text.assert_called_once_with(
@@ -118,7 +127,8 @@ def test_callback_main_menu():
     callback.answer.assert_called_once()
 
 
-def test_callback_participate_success():
+@pytest.mark.asyncio
+async def test_callback_participate_success():
     """
     Тест для проверки callback_participate при успешном участии.
     """
@@ -138,13 +148,14 @@ def test_callback_participate_success():
                 with patch("handlers.basic_handlers.get_participants_count", return_value=5):
                     with patch("handlers.basic_handlers.get_participate_keyboard", return_value="keyboard"):
                         with patch.dict("handlers.basic_handlers.MESSAGES", {"participation_success": "Success"}):
-                            callback_participate(callback)
+                            await callback_participate(callback)
                             
     callback.answer.assert_called_once_with("Success", show_alert=True)
     callback.message.edit_reply_markup.assert_called_once_with(reply_markup="keyboard")
 
 
-def test_callback_participate_already_participating():
+@pytest.mark.asyncio
+async def test_callback_participate_already_participating():
     """
     Тест для проверки callback_participate при повторном участии.
     """
@@ -159,12 +170,13 @@ def test_callback_participate_already_participating():
         with patch("handlers.basic_handlers.check_user_subscription", return_value=True):
             with patch("handlers.basic_handlers.add_participant", return_value=False):
                 with patch.dict("handlers.basic_handlers.MESSAGES", {"already_participating": "Already"}):
-                    callback_participate(callback)
+                    await callback_participate(callback)
                     
     callback.answer.assert_called_once_with("Already", show_alert=True)
 
 
-def test_callback_participate_not_subscribed():
+@pytest.mark.asyncio
+async def test_callback_participate_not_subscribed():
     """
     Тест для проверки callback_participate при отсутствии подписки.
     """
@@ -178,12 +190,13 @@ def test_callback_participate_not_subscribed():
     with patch("handlers.basic_handlers.get_giveaway", return_value=mock_giveaway):
         with patch("handlers.basic_handlers.check_user_subscription", return_value=False):
             with patch.dict("handlers.basic_handlers.MESSAGES", {"not_subscribed": "Not subscribed"}):
-                callback_participate(callback)
+               await callback_participate(callback)
                 
     callback.answer.assert_called_once_with("Not subscribed", show_alert=True)
 
 
-def test_callback_participate_giveaway_ended():
+@pytest.mark.asyncio
+async def test_callback_participate_giveaway_ended():
     """
     Тест для проверки callback_participate при завершенном розыгрыше.
     """
@@ -194,12 +207,13 @@ def test_callback_participate_giveaway_ended():
     
     with patch("handlers.basic_handlers.get_giveaway", return_value=mock_giveaway):
         with patch.dict("handlers.basic_handlers.MESSAGES", {"giveaway_ended": "Ended"}):
-            callback_participate(callback)
+            await callback_participate(callback)
             
     callback.answer.assert_called_once_with("Ended", show_alert=True)
 
 
-def test_handle_unknown_message_admin():
+@pytest.mark.asyncio
+async def test_handle_unknown_message_admin():
     """
     Тест для проверки handle_unknown_message для администратора.
     """
@@ -209,12 +223,13 @@ def test_handle_unknown_message_admin():
     
     with patch("handlers.basic_handlers.is_admin", return_value=True):
         with patch.dict("handlers.basic_handlers.MESSAGES", {"unknown_command": "Unknown"}):
-            handle_unknown_message(message, state)
+            await handle_unknown_message(message, state)
             
     message.answer.assert_called_once_with("Unknown")
 
 
-def test_handle_unknown_message_user():
+@pytest.mark.asyncio
+async def test_handle_unknown_message_user():
     """
     Тест для проверки handle_unknown_message для пользователя.
     """
@@ -223,12 +238,13 @@ def test_handle_unknown_message_user():
     state.get_state.return_value = None
     
     with patch("handlers.basic_handlers.is_admin", return_value=False):
-        handle_unknown_message(message, state)
+        await handle_unknown_message(message, state)
         
     message.answer.assert_not_called()
 
 
-def test_handle_unknown_message_in_state():
+@pytest.mark.asyncio
+async def test_handle_unknown_message_in_state():
     """
     Тест для проверки handle_unknown_message при наличии состояния.
     """
@@ -236,6 +252,6 @@ def test_handle_unknown_message_in_state():
     state = create_state()
     state.get_state.return_value = "some_state"
     
-    handle_unknown_message(message, state)
+    await handle_unknown_message(message, state)
     
     message.answer.assert_not_called()
