@@ -102,7 +102,8 @@ async def callback_participate(callback: CallbackQuery):
             giveaway_id=giveaway_id,
             user_id=user.id,
             username=user.username,
-            first_name=user.first_name
+            first_name=user.first_name,
+            full_name=user.full_name
         )
         
         if success:

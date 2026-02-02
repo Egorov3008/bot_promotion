@@ -31,7 +31,8 @@ async def handle_new_subscriber(update: types.ChatMemberUpdated):
             channel_id=channel_id,
             user_id=user.id,
             username=user.username,
-            first_name=user.first_name
+            first_name=user.first_name,
+            full_name=user.full_name,
         )
         if success:
             logging.info(f"Подписчик добавлен: {user.id} в канале {channel_id}")

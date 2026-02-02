@@ -28,6 +28,7 @@ class Admin(Base):
     user_id = Column(BigInteger, unique=True, nullable=False)  # Telegram User ID
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
+    full_name = Column(String(255), nullable=True)
     is_main_admin = Column(Boolean, default=False)  # Главный админ
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -55,6 +56,7 @@ class ChannelSubscriber(Base):
     channel_id = Column(BigInteger, nullable=False)  # ID канала
     user_id = Column(BigInteger, nullable=False)     # Telegram ID пользователя
     username = Column(String(255), nullable=True)
+    full_name = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow)  # Время добавления
     left_at = Column(DateTime)
@@ -108,6 +110,7 @@ class Participant(Base):
     user_id = Column(BigInteger, nullable=False)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
+    full_name = Column(String(255), nullable=True)
     joined_at = Column(DateTime, default=datetime.utcnow)
     
     # Связь с розыгрышем
@@ -128,6 +131,7 @@ class Winner(Base):
     user_id = Column(BigInteger, nullable=False)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
+    full_name = Column(String(255), nullable=True)
     place = Column(Integer, nullable=False)  # 1, 2, 3... место
     won_at = Column(DateTime, default=datetime.utcnow)
     

@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from texts.messages import BUTTONS
-from database.models import Giveaway, Channel, Admin
+from database.models import Giveaway, Channel, Admin, Winner
 
 
 def get_main_admin_keyboard() -> InlineKeyboardMarkup:
@@ -342,3 +342,19 @@ def get_finished_list_with_pagination_keyboard(giveaways: List[Giveaway], page: 
     )
     builder.row(InlineKeyboardButton(text=BUTTONS["back"], callback_data="view_giveaways"))
     return builder.as_markup()
+
+
+async def get_winers_keyboard(winners: List[Winner]) -> InlineKeyboardMarkup:
+    """Клавиатура для просмотра победителей"""
+    builder = InlineKeyboardBuilder()
+    if winners:
+        for winner in winners:
+            url = f"tg://user?id={winner.user_id}"
+            winner_name = winner.first_name or winner.full_name
+            if winner.username:
+                winner_name = f" (@{winner.username})"
+            builder.row(
+                InlineKeyboardButton(text=winner_name, url=url))
+        builder.row(InlineKeyboardButton(text=BUTTONS["back"], callback_data="view_winners"))
+
+# TODO: Добавть клавиатуру назад в get_winers_keyboard

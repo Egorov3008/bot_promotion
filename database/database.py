@@ -53,6 +53,7 @@ async def add_main_admin():
                 user_id=config.MAIN_ADMIN_ID,
                 username="main_admin",
                 first_name="Главный администратор",
+                full_name="Главный администратор",
                 is_main_admin=True
             )
             session.add(main_admin)
@@ -70,7 +71,7 @@ async def is_admin(user_id: int) -> bool:
         return result.scalar_one_or_none() is not None
 
 
-async def add_admin(user_id: int, username: str = None, first_name: str = None) -> bool:
+async def add_admin(user_id: int, username: str = None, first_name: str = None, full_name: str = None) -> bool:
     """Добавление нового администратора"""
     async with async_session() as session:
         try:
@@ -78,6 +79,7 @@ async def add_admin(user_id: int, username: str = None, first_name: str = None) 
                 user_id=user_id,
                 username=username,
                 first_name=first_name,
+                full_name=full_name,
                 is_main_admin=False
             )
             session.add(admin)
@@ -114,7 +116,7 @@ async def get_all_admins() -> List[Admin]:
 
 
 async def update_admin_profile(user) -> None:
-    """Обновляет username/first_name администратора по данным Telegram пользователя."""
+    """Обновляет username/first_name/full_name администратора по данным Telegram пользователя."""
     async with async_session() as session:
         result = await session.execute(select(Admin).where(Admin.user_id == user.id))
         admin = result.scalar_one_or_none()
@@ -126,6 +128,11 @@ async def update_admin_profile(user) -> None:
             changed = True
         if admin.first_name != user.first_name:
             admin.first_name = user.first_name
+            changed = True
+        # Формируем полное имя из first_name и last_name, если есть
+        full_name = user.full_name or (user.first_name + (" " + user.last_name if user.last_name else ""))
+        if admin.full_name != full_name:
+            admin.full_name = full_name
             changed = True
         if changed:
             await session.commit()
@@ -378,7 +385,8 @@ async def finish_giveaway(giveaway_id: int, winners_data: List[dict] = None):
                     user_id=winner_data["user_id"],
                     username=winner_data.get("username"),
                     first_name=winner_data.get("first_name"),
-                    place=winner_data["place"]
+                    place=winner_data["place"],
+                    full_name=winner_data.get("full_name")
                 )
                 session.add(winner)
 
@@ -412,7 +420,7 @@ async def delete_giveaway(giveaway_id: int) -> bool:
 
 # Функции для работы с участниками
 async def add_participant(giveaway_id: int, user_id: int,
-                          username: str = None, first_name: str = None) -> bool:
+                          username: str = None, first_name: str = None, full_name: str = None) -> bool:
     """Добавление участника в розыгрыш"""
     async with async_session() as session:
         try:
@@ -432,7 +440,8 @@ async def add_participant(giveaway_id: int, user_id: int,
                 giveaway_id=giveaway_id,
                 user_id=user_id,
                 username=username,
-                first_name=first_name
+                first_name=first_name,
+                full_name=full_name
             )
             session.add(participant)
             await session.commit()
@@ -473,7 +482,7 @@ async def get_winners(giveaway_id: int) -> List[Winner]:
 
 
 async def add_winner(giveaway_id: int, user_id: int, place: int,
-                     username: str = None, first_name: str = None) -> bool:
+                     username: str = None, first_name: str = None, full_name: str = None) -> bool:
     """Добавление победителя"""
     async with async_session() as session:
         try:
@@ -482,6 +491,7 @@ async def add_winner(giveaway_id: int, user_id: int, place: int,
                 user_id=user_id,
                 username=username,
                 first_name=first_name,
+                full_name=full_name,
                 place=place
             )
             session.add(winner)
@@ -492,7 +502,7 @@ async def add_winner(giveaway_id: int, user_id: int, place: int,
             return False
 
 
-async def add_channel_subscriber(channel_id: int, user_id: int, username: str = None, first_name: str = None):
+async def add_channel_subscriber(channel_id: int, user_id: int, username: str = None, first_name: str = None, full_name: str = None):
     """
     Добавляет пользователя как подписчика канала.
     Если запись уже есть, но с left_at — обновляет её (считаем повторную подписку).
@@ -514,6 +524,7 @@ async def add_channel_subscriber(channel_id: int, user_id: int, username: str = 
                     subscriber.left_at = None
                     subscriber.username = username
                     subscriber.first_name = first_name
+                    subscriber.full_name = full_name
                     await session.commit()
                     return True
                 else:
@@ -525,7 +536,8 @@ async def add_channel_subscriber(channel_id: int, user_id: int, username: str = 
                     channel_id=channel_id,
                     user_id=user_id,
                     username=username,
-                    first_name=first_name
+                    first_name=first_name,
+                    full_name=full_name
                 )
                 session.add(subscriber)
                 await session.commit()
