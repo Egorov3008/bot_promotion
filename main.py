@@ -58,7 +58,10 @@ async def main():
     try:
         # Запуск бота
         logging.info("Бот запущен!")
-        await dp.start_polling(bot)
+        await dp.start_polling(
+            bot,
+            allowed_updates=["message", "callback_query", "chat_member"]
+        )
     finally:
         await bot.session.close()
 

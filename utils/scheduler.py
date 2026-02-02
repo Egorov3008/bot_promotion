@@ -15,6 +15,10 @@ from utils.keyboards import get_participate_keyboard
 
 scheduler = AsyncIOScheduler(timezone=timezone.utc)
 
+# TODO: Добавить возможность оповещения
+#  администратора о завершении розыгрыша
+#  с указанием победителя
+
 # Словарь для хранения настроек напоминаний по розыгрышам
 REMINDER_SETTINGS = {
     # giveaway_id: {
@@ -295,6 +299,9 @@ async def finish_giveaway_task(bot, giveaway_id: int):
                 parse_mode="HTML",
                 reply_to_message_id=giveaway.message_id if giveaway.message_id else None
             )
+
+
+
             logging.info(f"Розыгрыш #{giveaway_id} завершен. Итоги опубликованы.")
 
         except Exception as e:

@@ -1,13 +1,14 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
+
+from sqlalchemy import select, delete, update, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
-from sqlalchemy import select, delete, update, func
-from sqlalchemy.exc import IntegrityError
-from datetime import datetime, timedelta
 
 from config import config
-from database.models import Base, Admin, Channel, Giveaway, Participant, Winner, GiveawayStatus
+from database.models import Base, Admin, Channel, Giveaway, Participant, Winner, GiveawayStatus, ChannelSubscriber
 
 # Создаем асинхронный движок БД
 engine = create_async_engine(
@@ -26,7 +27,7 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         logging.info("База данных инициализирована")
-    
+
     # Добавляем главного админа, если его нет
     await add_main_admin()
 
@@ -45,7 +46,7 @@ async def add_main_admin():
             select(Admin).where(Admin.user_id == config.MAIN_ADMIN_ID)
         )
         admin = result.scalar_one_or_none()
-        
+
         if not admin:
             # Создаем главного админа
             main_admin = Admin(
@@ -97,7 +98,7 @@ async def remove_admin(user_id: int) -> bool:
             )
         )
         admin = result.scalar_one_or_none()
-        
+
         if admin:
             await session.delete(admin)
             await session.commit()
@@ -131,8 +132,8 @@ async def update_admin_profile(user) -> None:
 
 
 # Функции для работы с каналами
-async def add_channel(channel_id: int, channel_name: str, 
-                     channel_username: str = None, added_by: int = None) -> bool:
+async def add_channel(channel_id: int, channel_name: str,
+                      channel_username: str = None, added_by: int = None) -> bool:
     """Добавление канала"""
     async with async_session() as session:
         try:
@@ -155,16 +156,16 @@ async def add_channel_by_username(channel_username: str, bot, added_by: int = No
     try:
         # Очищаем username от лишних символов
         clean_username = channel_username.replace('@', '').replace('https://t.me/', '').replace('http://t.me/', '')
-        
+
         # Получаем информацию о канале
         try:
             chat = await bot.get_chat(f"@{clean_username}")
         except Exception:
             return False, "❌ Канал не найден или недоступен!"
-        
+
         if chat.type != "channel":
             return False, "❌ Это не канал!"
-        
+
         # Проверяем права бота
         try:
             bot_member = await bot.get_chat_member(chat.id, bot.id)
@@ -172,7 +173,7 @@ async def add_channel_by_username(channel_username: str, bot, added_by: int = No
                 return False, "❌ Бот не является администратором этого канала!"
         except Exception:
             return False, "❌ Нет доступа к каналу! Добавьте бота как администратора."
-        
+
         # Добавляем канал
         success = await add_channel(
             channel_id=chat.id,
@@ -180,12 +181,12 @@ async def add_channel_by_username(channel_username: str, bot, added_by: int = No
             channel_username=clean_username,
             added_by=added_by
         )
-        
+
         if success:
             return True, f"✅ Канал '{chat.title}' успешно добавлен!"
         else:
             return False, "⚠️ Этот канал уже добавлен в базу."
-            
+
     except Exception as e:
         return False, f"❌ Ошибка при добавлении канала: {str(e)}"
 
@@ -206,7 +207,7 @@ async def remove_channel(channel_id: int) -> bool:
             select(Channel).where(Channel.channel_id == channel_id)
         )
         channel = result.scalar_one_or_none()
-        
+
         if channel:
             await session.delete(channel)
             await session.commit()
@@ -215,9 +216,9 @@ async def remove_channel(channel_id: int) -> bool:
 
 
 # Функции для работы с розыгрышами
-async def create_giveaway(title: str, description: str, end_time, 
-                         channel_id: int, created_by: int, winner_places: int = 1,
-                         media_type: str = None, media_file_id: str = None) -> Optional[Giveaway]:
+async def create_giveaway(title: str, description: str, end_time,
+                          channel_id: int, created_by: int, winner_places: int = 1,
+                          media_type: str = None, media_file_id: str = None) -> Optional[Giveaway]:
     """Создание нового розыгрыша"""
     async with async_session() as session:
         giveaway = Giveaway(
@@ -368,7 +369,7 @@ async def finish_giveaway(giveaway_id: int, winners_data: List[dict] = None):
             .where(Giveaway.id == giveaway_id)
             .values(status=GiveawayStatus.FINISHED.value)
         )
-        
+
         # Добавляем победителей
         if winners_data:
             for winner_data in winners_data:
@@ -380,7 +381,7 @@ async def finish_giveaway(giveaway_id: int, winners_data: List[dict] = None):
                     place=winner_data["place"]
                 )
                 session.add(winner)
-        
+
         await session.commit()
 
 
@@ -400,7 +401,7 @@ async def delete_giveaway(giveaway_id: int) -> bool:
             select(Giveaway).where(Giveaway.id == giveaway_id)
         )
         giveaway = result.scalar_one_or_none()
-        
+
         if giveaway:
             await session.delete(giveaway)
             await session.commit()
@@ -410,8 +411,8 @@ async def delete_giveaway(giveaway_id: int) -> bool:
 
 
 # Функции для работы с участниками
-async def add_participant(giveaway_id: int, user_id: int, 
-                         username: str = None, first_name: str = None) -> bool:
+async def add_participant(giveaway_id: int, user_id: int,
+                          username: str = None, first_name: str = None) -> bool:
     """Добавление участника в розыгрыш"""
     async with async_session() as session:
         try:
@@ -423,10 +424,10 @@ async def add_participant(giveaway_id: int, user_id: int,
                 )
             )
             existing = result.scalar_one_or_none()
-            
+
             if existing:
                 return False  # Уже участвует
-            
+
             participant = Participant(
                 giveaway_id=giveaway_id,
                 user_id=user_id,
@@ -472,7 +473,7 @@ async def get_winners(giveaway_id: int) -> List[Winner]:
 
 
 async def add_winner(giveaway_id: int, user_id: int, place: int,
-                    username: str = None, first_name: str = None) -> bool:
+                     username: str = None, first_name: str = None) -> bool:
     """Добавление победителя"""
     async with async_session() as session:
         try:
@@ -489,3 +490,134 @@ async def add_winner(giveaway_id: int, user_id: int, place: int,
         except IntegrityError:
             await session.rollback()
             return False
+
+
+async def add_channel_subscriber(channel_id: int, user_id: int, username: str = None, first_name: str = None):
+    """
+    Добавляет пользователя как подписчика канала.
+    Если запись уже есть, но с left_at — обновляет её (считаем повторную подписку).
+    """
+    async with async_session() as session:
+        try:
+            # Проверяем, существует ли уже запись
+            result = await session.execute(
+                select(ChannelSubscriber).where(
+                    ChannelSubscriber.channel_id == channel_id,
+                    ChannelSubscriber.user_id == user_id
+                )
+            )
+            subscriber = result.scalar_one_or_none()
+
+            if subscriber:
+                # Если пользователь уже есть, но отписался — обновляем как повторную подписку
+                if subscriber.left_at is not None:
+                    subscriber.left_at = None
+                    subscriber.username = username
+                    subscriber.first_name = first_name
+                    await session.commit()
+                    return True
+                else:
+                    # Уже состоит — ничего не делаем
+                    return False
+            else:
+                # Новый подписчик
+                subscriber = ChannelSubscriber(
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    username=username,
+                    first_name=first_name
+                )
+                session.add(subscriber)
+                await session.commit()
+                return True
+        except Exception as e:
+            await session.rollback()
+            print(f"Ошибка при добавлении подписчика: {e}")
+            return False
+
+
+async def remove_channel_subscriber(channel_id: int, user_id: int) -> bool:
+    """
+    Отмечает пользователя как отписавшегося от канала (устанавливает left_at).
+    """
+    async with async_session() as session:
+        try:
+            result = await session.execute(
+                select(ChannelSubscriber).where(
+                    ChannelSubscriber.channel_id == channel_id,
+                    ChannelSubscriber.user_id == user_id,
+                    ChannelSubscriber.left_at.is_(None)  # Только активные
+                )
+            )
+            subscriber = result.scalar_one_or_none()
+
+            if subscriber:
+                subscriber.left_at = func.now()
+                await session.commit()
+                return True
+            return False
+        except Exception as e:
+            await session.rollback()
+            print(f"Ошибка при удалении подписчика: {e}")
+            return False
+
+
+async def get_channel_subscribers_count(channel_id: int, as_of: datetime = None) -> int:
+    """
+    Получает количество *активных* подписчиков канала на указанную дату/время.
+    Если as_of не указан — возвращает текущее количество.
+    """
+    async with async_session() as session:
+        query = select(func.count(ChannelSubscriber.id)).where(
+            ChannelSubscriber.channel_id == channel_id,
+            ChannelSubscriber.added_at <= (as_of or func.now())
+        )
+        if as_of:
+            query = query.where(
+                or_(
+                    ChannelSubscriber.left_at.is_(None),
+                    ChannelSubscriber.left_at > as_of
+                )
+            )
+        else:
+            query = query.where(ChannelSubscriber.left_at.is_(None))
+
+        result = await session.execute(query)
+        return result.scalar_one()
+
+
+async def get_active_subscribers(channel_id: int) -> List[ChannelSubscriber]:
+    """
+    Возвращает список всех активных подписчиков канала.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChannelSubscriber).where(
+                ChannelSubscriber.channel_id == channel_id,
+                ChannelSubscriber.left_at.is_(None)
+            )
+        )
+        return result.scalars().all()
+
+
+async def was_user_subscriber(channel_id: int, user_id: int, at_time: datetime) -> bool:
+    """
+    Проверяет, был ли пользователь подписчиком канала на определённый момент времени.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChannelSubscriber).where(
+                ChannelSubscriber.channel_id == channel_id,
+                ChannelSubscriber.user_id == user_id,
+                ChannelSubscriber.added_at <= at_time
+            )
+        )
+        subscriber = result.scalar_one_or_none()
+
+        if not subscriber:
+            return False
+
+        # Если left_at позже времени проверки — значит, всё ещё был подписан
+        if subscriber.left_at is None:
+            return True
+        return subscriber.left_at > at_time

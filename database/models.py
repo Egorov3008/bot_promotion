@@ -3,8 +3,8 @@ from enum import Enum
 from typing import Optional, List
 
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Boolean, 
-    ForeignKey, BigInteger, create_engine
+    Column, Integer, String, Text, DateTime, Boolean,
+    ForeignKey, BigInteger, create_engine, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
@@ -46,6 +46,23 @@ class Channel(Base):
     # Связь с админом, который добавил канал
     admin = relationship("Admin", backref="channels")
 
+
+class ChannelSubscriber(Base):
+    """Модель подписчиков канала (все, кого добавили, пока бот был админом)"""
+    __tablename__ = "channel_subscribers"
+
+    id = Column(Integer, primary_key=True)
+    channel_id = Column(BigInteger, nullable=False)  # ID канала
+    user_id = Column(BigInteger, nullable=False)     # Telegram ID пользователя
+    username = Column(String(255), nullable=True)
+    first_name = Column(String(255), nullable=True)
+    added_at = Column(DateTime, default=datetime.utcnow)  # Время добавления
+    left_at = Column(DateTime)
+
+    # Уникальность: один пользователь — одна запись на канал
+    __table_args__ = (
+        UniqueConstraint('channel_id', 'user_id', name='unique_channel_user'),
+    )
 
 class Giveaway(Base):
     """Модель розыгрыша"""
