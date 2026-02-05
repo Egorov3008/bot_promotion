@@ -1,23 +1,18 @@
-import asyncio
+import logging
 import logging
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
-import pytz
 
-from database.database import get_active_giveaways, finish_giveaway, get_participants, delete_finished_older_than, get_participants_count
-from texts.messages import WINNER_ANNOUNCEMENT_TEMPLATE, NO_PARTICIPANTS_TEMPLATE, REMINDER_POST_TEMPLATE
+from database.database import get_active_giveaways, finish_giveaway, get_participants, delete_finished_older_than, \
+    get_participants_count, get_channel, get_giveaway
+from texts.messages import REMINDER_POST_TEMPLATE, MESSAGES
 from utils.datetime_utils import format_datetime
-from utils.keyboards import get_participate_keyboard
+from utils.keyboards import get_participate_keyboard, get_winers_keyboard
 
 scheduler = AsyncIOScheduler(timezone=timezone.utc)
-
-# TODO: Добавить возможность оповещения
-#  администратора о завершении розыгрыша
-#  с указанием победителя
 
 # Словарь для хранения настроек напоминаний по розыгрышам
 REMINDER_SETTINGS = {
@@ -138,7 +133,6 @@ def schedule_reminders(bot, giveaway):
 
 async def send_reminder(bot, giveaway_id: int, level: str):
     """Отправка напоминания"""
-    from database.database import get_giveaway
 
     settings = REMINDER_SETTINGS.get(giveaway_id)
     if not settings or not settings["enabled"]:
@@ -235,14 +229,14 @@ def cancel_giveaway_schedule(giveaway_id: int):
 async def finish_giveaway_task(bot, giveaway_id: int):
     """Задача завершения розыгрыша"""
     try:
-        from database.database import get_giveaway
-
         giveaway = await get_giveaway(giveaway_id)
+
         if not giveaway or giveaway.status != "active":
             return
 
         participants = await get_participants(giveaway_id)
-        relevant_participants = [p for p in participants if await check_user_subscription(bot, p.user_id, giveaway.channel_id)]
+        relevant_participants = [p for p in participants if
+                                 await check_user_subscription(bot, p.user_id, giveaway.channel_id)]
 
         if not relevant_participants:
             await finish_giveaway(giveaway_id)
@@ -264,12 +258,12 @@ async def finish_giveaway_task(bot, giveaway_id: int):
             winner_places = len(relevant_participants)
 
         winners = random.sample(relevant_participants, winner_places)
-
+        channel = await get_channel(giveaway.channel_id)
         winners_data = []
         winners_list = []
 
         for i, winner in enumerate(winners, 1):
-            winner_name = winner.first_name or "Пользователь"
+            winner_name = winner.first_name or winner.full_name
             if winner.username:
                 winner_name = f"@{winner.username}"
 
@@ -283,15 +277,16 @@ async def finish_giveaway_task(bot, giveaway_id: int):
                 "user_id": winner.user_id,
                 "username": winner.username,
                 "first_name": winner.first_name,
+                "full_name": winner.full_name,
                 "place": i
             })
 
         await finish_giveaway(giveaway_id=giveaway_id, winners_data=winners_data)
 
         winner_message = (
-            "🎊 <b>РОЗЫГРЫШ ЗАВЕРШЕН!</b>\n\n" + "\n".join(winners_list) + "\n\n🎉 Поздравляем!"
+                "🎊 <b>РОЗЫГРЫШ ЗАВЕРШЕН!</b>\n\n" + "\n".join(winners_list) + "\n\n🎉 Поздравляем!"
         )
-
+        keyboard_admin = await get_winers_keyboard(winners_data)
         try:
             await bot.send_message(
                 chat_id=giveaway.channel_id,
@@ -299,9 +294,13 @@ async def finish_giveaway_task(bot, giveaway_id: int):
                 parse_mode="HTML",
                 reply_to_message_id=giveaway.message_id if giveaway.message_id else None
             )
-
-
-
+            logging.debug(f"Отправлено сообщение о победителе для розыгрыша #{giveaway_id}")
+            await bot.send_message(
+                chat_id=channel.admin,
+                text=MESSAGES.get("result_giveaway").format(winner="\n".join(winners_list)),
+                reply_markup=keyboard_admin
+            )
+            logging.debug(f"Отправлено сообщение об итогах для администратора канала {channel.admin}")
             logging.info(f"Розыгрыш #{giveaway_id} завершен. Итоги опубликованы.")
 
         except Exception as e:

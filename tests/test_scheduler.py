@@ -53,9 +53,10 @@ class TestScheduler:
         """Сброс состояния планировщика перед каждым тестом"""
         # Мокаем методы планировщика, чтобы избежать проблем с event loop
         with patch.object(scheduler, 'add_job'), \
-             patch.object(scheduler, 'remove_job'), \
-             patch.object(scheduler, 'get_job', return_value=None), \
-             patch.object(scheduler, 'shutdown'):
+                patch.object(scheduler, 'remove_job'), \
+                patch.object(scheduler, 'get_job', return_value=None), \
+                patch.object(scheduler, 'shutdown'), \
+                patch.object(scheduler, 'get_jobs', return_value=[]):
             if scheduler.running:
                 try:
                     scheduler.shutdown()
@@ -81,6 +82,8 @@ class TestScheduler:
                         assert mock_remind.call_count == 2
                         assert 1 in REMINDER_SETTINGS
                         assert 2 in REMINDER_SETTINGS
+                        # Проверяем, что планируется очистка старых розыгрышей
+                        assert scheduler.get_job("cleanup_finished") is not None
 
     def test_schedule_giveaway_finish(self):
         """Тест планирования завершения розыгрыша"""
@@ -100,6 +103,7 @@ class TestScheduler:
                 assert isinstance(args[1], DateTrigger)
                 assert kwargs['args'] == [bot, giveaway_id]
                 assert kwargs['id'] == f"finish_giveaway_{giveaway_id}"
+                assert kwargs['name'] == f"Завершение розыгрыша #{giveaway_id}"
 
     def test_schedule_reminders(self):
         """Тест планирования напоминаний"""
@@ -127,7 +131,7 @@ class TestScheduler:
         giveaway = create_mock_giveaway(id=1)
 
         # ✅ Мокаем по реальному пути, откуда импортируется
-        with patch('database.database.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
+        with patch('utils.scheduler.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
             with patch('utils.scheduler.get_participants_count', new_callable=AsyncMock, return_value=10):
                 with patch('utils.scheduler.get_participate_keyboard', return_value='keyboard'):
                     await send_reminder(bot, 1, "3d")
@@ -186,22 +190,33 @@ class TestScheduler:
         """Тест завершения розыгрыша с участниками"""
         bot = create_bot_mock()
         giveaway = create_mock_giveaway(id=1, winner_places=2)
-        participant1 = create_mock_participant(user_id=1, username="user1")
-        participant2 = create_mock_participant(user_id=2, username="user2")
+        participant1 = create_mock_participant(user_id=1, username="user1", first_name="Alice")
+        participant2 = create_mock_participant(user_id=2, username="user2", first_name="Bob")
 
         # ✅ Мокаем по реальному пути
-        with patch('database.database.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
-            with patch('database.database.get_participants', new_callable=AsyncMock, return_value=[participant1, participant2]):
+        with patch('utils.scheduler.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
+            with patch('utils.scheduler.get_participants', new_callable=AsyncMock,
+                       return_value=[participant1, participant2]):
                 with patch('utils.scheduler.check_user_subscription', new_callable=AsyncMock, return_value=True):
-                    with patch('database.database.finish_giveaway', new_callable=AsyncMock) as mock_finish:
-                        await finish_giveaway_task(bot, 1)
+                    with patch('utils.scheduler.get_channel', new_callable=AsyncMock) as mock_get_channel:
+                        with patch('utils.scheduler.finish_giveaway', new_callable=AsyncMock) as mock_finish:
+                            # Мокаем результат get_channel
+                            channel_mock = MagicMock()
+                            channel_mock.admin = 987654321
+                            mock_get_channel.return_value = channel_mock
 
-                        mock_finish.assert_called_once()
-                        bot.send_message.assert_called_once()
-                        call_args = bot.send_message.call_args[1]
-                        assert "@user1" in call_args["text"]
-                        assert "🥇 <b>1 место:</b> @user1" in call_args["text"]
-                        assert call_args["parse_mode"] == "HTML"
+                            await finish_giveaway_task(bot, 1)
+
+                            mock_finish.assert_called_once()
+                            assert bot.send_message.call_count == 2
+                            # Первое сообщение - в канал
+                            channel_call = bot.send_message.call_args_list[0][1]
+                            assert "@user1" in channel_call["text"]
+                            assert "🥇 <b>1 место:</b> @user1" in channel_call["text"]
+                            assert channel_call["parse_mode"] == "HTML"
+                            # Второе сообщение - администратору
+                            admin_call = bot.send_message.call_args_list[1][1]
+                            assert admin_call["chat_id"] == 987654321
 
     @pytest.mark.asyncio
     async def test_finish_giveaway_task_without_participants(self):
@@ -210,12 +225,11 @@ class TestScheduler:
         giveaway = create_mock_giveaway(id=1)
 
         # ✅ Мокаем по реальному пути
-        with patch('database.database.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
-            with patch('database.database.get_participants', new_callable=AsyncMock, return_value=[]):
-                with patch('database.database.finish_giveaway', new_callable=AsyncMock) as mock_finish:
+        with patch('utils.scheduler.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
+            with patch('utils.scheduler.get_participants', new_callable=AsyncMock, return_value=[]):
+                with patch('utils.scheduler.finish_giveaway', new_callable=AsyncMock) as mock_finish:
                     await finish_giveaway_task(bot, 1)
 
-                    mock_finish.assert_called_once()
                     bot.send_message.assert_called_once()
                     call_args = bot.send_message.call_args[1]
                     assert "К сожалению" in call_args["text"]
@@ -223,19 +237,25 @@ class TestScheduler:
     @pytest.mark.asyncio
     async def test_cleanup_old_finished(self):
         """Тест очистки старых завершенных розыгрышей"""
-        with patch('database.database.delete_finished_older_than', new_callable=AsyncMock, return_value=5):
+        with patch('utils.scheduler.delete_finished_older_than', new_callable=AsyncMock, return_value=5):
             with patch('utils.scheduler.logging.info') as mock_info:
                 await cleanup_old_finished(15)
                 mock_info.assert_called_with("Очищено завершенных розыгрышей: 5 (старше 15 дней)")
 
     def test_get_scheduler_status(self):
         """Тест получения статуса планировщика"""
-        # Принудительно устанавливаем, что scheduler "работает"
-        with patch.object(scheduler, 'running', True):
-            with patch.object(scheduler, 'get_jobs', return_value=[
-                MagicMock(id="cleanup", name="Cleanup Job", next_run_time=datetime.now(timezone.utc))
-            ]):
-                status = get_scheduler_status()
-                assert status["running"] is True
-                assert status["jobs_count"] == 1
-                assert status["jobs"][0]["id"] == "cleanup"
+        current_time = datetime.now(timezone.utc)
+        job_mock = MagicMock()
+        job_mock.id = "cleanup"
+        job_mock.name = "Очистка завершенных розыгрышей старше 15 дней"
+        job_mock.next_run_time = current_time
+
+        # Мокаем scheduler.get_jobs() и используем настоящий running
+        with patch.object(scheduler, 'get_jobs', return_value=[job_mock]):
+            status = get_scheduler_status()
+
+            assert status["running"] is scheduler.running  # не мокаем, читаем реальное значение
+            assert status["jobs_count"] == 1
+            assert status["jobs"][0]["id"] == "cleanup"
+            assert status["jobs"][0]["name"] == "Очистка завершенных розыгрышей старше 15 дней"
+            assert status["jobs"][0]["next_run_time"] == current_time

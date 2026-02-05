@@ -633,3 +633,11 @@ async def was_user_subscriber(channel_id: int, user_id: int, at_time: datetime) 
         if subscriber.left_at is None:
             return True
         return subscriber.left_at > at_time
+
+
+async def get_channel(channel_id: int) -> Optional[Channel]:
+    async with async_session() as session:
+        result = await session.execute(
+            select(Channel).where(Channel.id == channel_id)
+        )
+        return result.scalar_one_or_none()

@@ -1,5 +1,5 @@
 import logging
-from aiogram import Router, types
+from aiogram import Router, types, F
 from database.database import add_channel_subscriber, remove_channel_subscriber
 
 router = Router()
@@ -50,6 +50,31 @@ async def handle_new_subscriber(update: types.ChatMemberUpdated):
         else:
             logging.info(f"Не удалось отписать пользователя: {user.id} в канале {channel_id} (возможно, уже отписан)")
 
+
+@router.message()
+async def handle_reaction(message: types.Message):
+    logging.info(f"Пользователь {message.from_user.id} написал комментарий: {message.message_id}")
+
+@router.message_reaction()
+async def handle_reaction(update: types.MessageReactionUpdated):
+    """
+    Обработка изменений реакций (Bot API 7.0+).
+    Требуется aiogram 3.x и включённые реакции в allowed_updates.
+    """
+    # Проверка: реакция в канале
+    logging.info(f"Обновление реакции: {update}")
+    if update.chat.type != "channel":
+        return
+
+    channel_id = update.chat.id
+    user = update.user or update.actor_chat  # actor_chat для анонимных админов
+    if not user:
+        return
+
+    # Если были старые реакции — удаляем их из статистики?
+    # Или логируем каждое изменение?
+    for reaction in update.new_reaction:
+        logging.info(f"Реакция: {user.id} → {reaction.emoji} на пост {update.message_id}")
 
 def chat_member_handlers(dp):
     """Регистрация базовых хендлеров"""

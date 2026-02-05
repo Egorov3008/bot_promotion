@@ -60,7 +60,7 @@ async def main():
         logging.info("Бот запущен!")
         await dp.start_polling(
             bot,
-            allowed_updates=["message", "callback_query", "chat_member"]
+            # allowed_updates=["message", "callback_query", "chat_member", "message_reaction"]
         )
     finally:
         await bot.session.close()
