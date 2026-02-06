@@ -101,6 +101,15 @@ __pycache__/
 env/
 database/
 
+# Project-specific
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.sqlite-shm
+*.sqlite-wal
+
 # OS generated files
 .DS_Store
 .DS_Store?
