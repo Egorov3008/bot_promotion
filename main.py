@@ -17,7 +17,7 @@ async def main():
     """Основная функция запуска бота"""
     # Настройка логирования
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler('bot.log', encoding='utf-8'),

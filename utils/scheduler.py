@@ -28,40 +28,48 @@ REMINDER_SETTINGS = {
 }
 
 
+# utils/scheduler.py
+
+from datetime import datetime, timezone
+from database.database import get_active_giveaways
+from .datetime_utils import parse_datetime  # убедитесь, что возвращает tz-aware
+
 async def setup_scheduler(bot):
-    """Настройка планировщика"""
-    scheduler.start()
+    scheduler = AsyncIOScheduler(timezone="UTC")
 
-    # Планируем все активные розыгрыши
     active_giveaways = await get_active_giveaways()
+
     for giveaway in active_giveaways:
-        if giveaway.end_time > datetime.now(timezone.utc):
-            schedule_giveaway_finish(bot, giveaway.id, giveaway.end_time)
+        # Приводим end_time к offset-aware
+        if giveaway.end_time.tzinfo is None:
+            end_time = giveaway.end_time.replace(tzinfo=timezone.utc)
+        else:
+            end_time = giveaway.end_time
 
-            # Восстанавливаем настройки напоминаний (если были сохранены в БД)
-            REMINDER_SETTINGS[giveaway.id] = {
-                "enabled": True,  # По умолчанию включено
-                "reminded_3d": False,
-                "reminded_1d": False,
-                "reminded_3h": False
-            }
-            schedule_reminders(bot, giveaway)
+        now = datetime.now(timezone.utc)
 
-    # Ежедневная авто-очистка завершенных старше 15 дней
-    try:
-        scheduler.add_job(
-            cleanup_old_finished,
-            "interval",
-            days=1,
-            id="cleanup_finished",
-            name="Очистка завершенных розыгрышей старше 15 дней",
-            args=[15]
-        )
-    except Exception:
-        pass
+        if end_time > now:
+            delay = (end_time - now).total_seconds()
+            scheduler.add_job(
+                finish_giveaway_task,
+                'date',
+                run_date=end_time,
+                args=[bot, giveaway.id],
+                id=f"giveaway_{giveaway.id}"
+            )
+            # Планируем напоминания
+            await schedule_reminders(bot, giveaway)
 
-    logging.info(f"Запланировано {len(active_giveaways)} активных розыгрышей")
+    # Ежедневная очистка
+    scheduler.add_job(
+        cleanup_old_finished,
+        'interval',
+        days=1,
+        args=[15]
+    )
 
+    scheduler.start()
+    logging.info(f"✅ Планировщик запущен. Запланировано активных розыгрышей: {len(active_giveaways)}")
 
 def schedule_giveaway_finish(bot, giveaway_id: int, end_time: datetime):
     """Планирование завершения розыгрыша"""
@@ -283,6 +291,10 @@ async def finish_giveaway_task(bot, giveaway_id: int):
                 "full_name": winner.full_name,
                 "place": i
             })
+            await bot.send_message(
+                chat_id=winner.user_id,
+                text="🎉 <b>Поздравляем с победой!</b>\n\nВы выиграли розыгрыш!"
+            )
 
         await finish_giveaway(giveaway_id=giveaway_id, winners_data=winners_data)
 
@@ -298,6 +310,7 @@ async def finish_giveaway_task(bot, giveaway_id: int):
                 parse_mode="HTML",
                 reply_to_message_id=giveaway.message_id if giveaway.message_id else None
             )
+
             logging.debug(f"Отправлено сообщение о победителе для розыгрыша #{giveaway_id}")
 
         except Exception as e:

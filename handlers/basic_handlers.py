@@ -4,18 +4,32 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 
+from config import config
 from texts.messages import MESSAGES, BUTTONS
 from utils.keyboards import get_main_admin_keyboard, get_participate_keyboard
 from database.database import (
     add_participant, get_participants_count, 
     get_giveaway, update_giveaway_message_id, is_admin
 )
+from utils.pyro_client import pyro_client
 from utils.scheduler import check_user_subscription
 
 router = Router()
 
 
 # Удалён универсальный логгер сообщений, чтобы не блокировать другие хендлеры
+
+@router.message(lambda m: m.text == "/test_send")
+async def send_message_pyrogram(message: Message):
+    if message.from_user.id != config.MAIN_ADMIN_ID:
+        return
+
+    success = await pyro_client.send_message(
+        "@klevyi_internrt",  # замените на реальный username
+        "Тестовое сообщение от Pyrogram! 🚀"
+    )
+    status = "✅ Успешно" if success else "❌ Ошибка"
+    await message.answer(f"Отправка: {status}")
 
 
 @router.message(Command("start"))
