@@ -19,7 +19,7 @@ from utils.keyboards import (
 from database.database import (
     get_all_admins, add_admin, remove_admin,
     get_all_channels, add_channel, remove_channel, add_channel_by_username,
-    get_active_giveaways, get_finished_giveaways
+    get_active_giveaways, get_finished_giveaways, is_admin
 )
 
 router = Router()
@@ -77,26 +77,85 @@ async def callback_add_admin(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+
 @router.message(StateFilter(AdminManagementStates.WAITING_NEW_ADMIN_ID))
-async def process_new_admin_id(message: Message, state: FSMContext):
-    """Обработка ID нового администратора (без обязательного поиска в Telegram)"""
+async def process_new_admin_id(message: Message, state: FSMContext, bot):
+    """
+    Обработка добавления админа через:
+    - @username
+    - t.me/username
+    - https://t.me/username
+    - user_id (число)
+    """
+    text = message.text.strip()
+    username = None
+
+    # Извлекаем username из разных форматов
+    if text.startswith('@'):
+        username = text[1:]
+    elif 't.me/' in text:
+        # Поддержка: https://t.me/username, t.me/username
+        start = text.rfind('/') + 1
+        username = text[start:]
+    elif text.isdigit():
+        # Это user_id — оставляем как есть
+        try:
+            user_id = int(text)
+            await _save_admin_and_confirm(message, state, user_id=user_id, username=None, full_name=f"ID: {user_id}")
+            return
+        except ValueError:
+            pass
+
+    if not username:
+        await message.answer(MESSAGES["invalid_username_or_id"])
+        return
+
+    # Пытаемся получить информацию о пользователе через get_chat
     try:
-        user_id = int(message.text.strip())
-        # Сохраняем данные для подтверждения (минимальные)
-        await state.update_data(
-            new_admin_id=user_id,
-            new_admin_name=f"ID: {user_id}",
-            new_admin_username=None
-        )
-        await state.set_state(AdminManagementStates.CONFIRM_ADD_ADMIN)
-        
+        chat = await bot.get_chat(f"@{username}" if not username.startswith('@') else username)
+
+        if chat.type not in ("private",):  # Убедимся, что это пользователь
+            await message.answer("❌ Указанная ссылка ведёт не на пользователя.")
+            return
+
+        user_id = chat.id
+        full_name = f"{chat.first_name} {chat.last_name}" if chat.last_name else chat.first_name
+        await _save_admin_and_confirm(message, state, user_id=user_id, username=chat.username, full_name=full_name)
+
+    except Exception as e:
+        # Логируем ошибку, но не показываем пользователю детали
+        logging.warning(f"Не удалось найти пользователя по username '{username}': {e}")
+
+        # Предлагаем ввести ID вручную
         await message.answer(
-            MESSAGES["confirm_add_admin"].format(user=f"ID: {user_id}"),
-            reply_markup=get_confirm_keyboard()
+            MESSAGES["cannot_resolve_username"].format(username=username) +
+            "\n\n" + MESSAGES["fallback_enter_id"],
+            parse_mode="HTML"
         )
-        
-    except ValueError:
-        await message.answer(MESSAGES["invalid_user_id"])
+
+
+async def _save_admin_and_confirm(message: Message, state: FSMContext, user_id: int, username: str, full_name: str):
+    """Сохраняет данные админа и переходит к подтверждению"""
+    # Проверим, не является ли уже админом
+    if await is_admin(user_id):
+        await message.answer(MESSAGES["admin_already_exists"])
+        await state.clear()
+        return
+
+    await state.update_data(
+        new_admin_id=user_id,
+        new_admin_username=username,
+        new_admin_name=full_name
+    )
+    await state.set_state(AdminManagementStates.CONFIRM_ADD_ADMIN)
+
+    display_name = f"<a href='tg://user?id={user_id}'>{full_name}</a>" if full_name else f"ID: {user_id}"
+
+    await message.answer(
+        MESSAGES["confirm_add_admin"].format(user=display_name),
+        reply_markup=get_confirm_keyboard(),
+        parse_mode="HTML"
+    )
 
 
 @router.callback_query(F.data == "confirm", StateFilter(AdminManagementStates.CONFIRM_ADD_ADMIN))

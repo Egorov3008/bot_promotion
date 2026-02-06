@@ -43,6 +43,7 @@ class Channel(Base):
     channel_username = Column(String(255), nullable=True)  # @channel_username
     added_by = Column(BigInteger, ForeignKey('admins.user_id'))
     created_at = Column(DateTime, default=datetime.utcnow)
+    discussion_group_id = Column(Integer, nullable=True)
     
     # Связь с админом, который добавил канал
     admin = relationship("Admin", backref="channels")
@@ -60,6 +61,7 @@ class ChannelSubscriber(Base):
     first_name = Column(String(255), nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow)  # Время добавления
     left_at = Column(DateTime)
+    last_activity_at = Column(DateTime, nullable=True)
 
     # Уникальность: один пользователь — одна запись на канал
     __table_args__ = (

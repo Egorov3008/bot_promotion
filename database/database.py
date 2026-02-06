@@ -140,7 +140,8 @@ async def update_admin_profile(user) -> None:
 
 # Функции для работы с каналами
 async def add_channel(channel_id: int, channel_name: str,
-                      channel_username: str = None, added_by: int = None) -> bool:
+                      channel_username: str = None, added_by: int = None,
+                      discussion_group_id: int = None) -> bool:
     """Добавление канала"""
     async with async_session() as session:
         try:
@@ -148,7 +149,8 @@ async def add_channel(channel_id: int, channel_name: str,
                 channel_id=channel_id,
                 channel_name=channel_name,
                 channel_username=channel_username,
-                added_by=added_by
+                added_by=added_by,
+                discussion_group_id=discussion_group_id,
             )
             session.add(channel)
             await session.commit()
@@ -159,16 +161,15 @@ async def add_channel(channel_id: int, channel_name: str,
 
 
 async def add_channel_by_username(channel_username: str, bot, added_by: int = None) -> tuple[bool, str]:
-    """Добавление канала по username/ссылке"""
+    """Добавление канала по username/ссылке + автоматическое получение discussion group"""
     try:
-        # Очищаем username от лишних символов
         clean_username = channel_username.replace('@', '').replace('https://t.me/', '').replace('http://t.me/', '')
 
         # Получаем информацию о канале
         try:
             chat = await bot.get_chat(f"@{clean_username}")
-        except Exception:
-            return False, "❌ Канал не найден или недоступен!"
+        except Exception as e:
+            return False, f"❌ Канал не найден: {str(e)}"
 
         if chat.type != "channel":
             return False, "❌ Это не канал!"
@@ -181,18 +182,27 @@ async def add_channel_by_username(channel_username: str, bot, added_by: int = No
         except Exception:
             return False, "❌ Нет доступа к каналу! Добавьте бота как администратора."
 
-        # Добавляем канал
+        # ←←← ОПРЕДЕЛЯЕМ ГРУППУ ОБСУЖДЕНИЯ ←←←
+        discussion_group_id = chat.linked_chat_id  # Может быть None
+
+        # Добавляем или обновляем канал
         success = await add_channel(
             channel_id=chat.id,
             channel_name=chat.title,
             channel_username=clean_username,
-            added_by=added_by
+            added_by=added_by,
+            discussion_group_id=discussion_group_id  # ← автоматически!
         )
 
         if success:
-            return True, f"✅ Канал '{chat.title}' успешно добавлен!"
+            status = f"✅ Канал '{chat.title}' добавлен!"
+            if discussion_group_id:
+                status += f"\n🔗 Привязана группа обсуждений: {discussion_group_id}"
+            else:
+                status += "\nℹ️ У канала нет группы обсуждений."
+            return True, status
         else:
-            return False, "⚠️ Этот канал уже добавлен в базу."
+            return False, "⚠️ Канал уже добавлен (обновлены данные)."
 
     except Exception as e:
         return False, f"❌ Ошибка при добавлении канала: {str(e)}"
@@ -502,7 +512,8 @@ async def add_winner(giveaway_id: int, user_id: int, place: int,
             return False
 
 
-async def add_channel_subscriber(channel_id: int, user_id: int, username: str = None, first_name: str = None, full_name: str = None):
+async def add_channel_subscriber(channel_id: int, user_id: int, username: str = None, first_name: str = None,
+                                 full_name: str = None):
     """
     Добавляет пользователя как подписчика канала.
     Если запись уже есть, но с left_at — обновляет её (считаем повторную подписку).
@@ -546,6 +557,48 @@ async def add_channel_subscriber(channel_id: int, user_id: int, username: str = 
             await session.rollback()
             print(f"Ошибка при добавлении подписчика: {e}")
             return False
+
+
+async def update_last_activity(channel_id: int, user_id: int, username: str = None, first_name: str = None,
+                               full_name: str = None):
+    async with async_session() as session:
+        stmt = select(ChannelSubscriber).where(
+            ChannelSubscriber.channel_id == channel_id,
+            ChannelSubscriber.user_id == user_id,
+            ChannelSubscriber.left_at.is_(None)
+        )
+        result = await session.execute(stmt)
+        sub = result.scalar_one_or_none()
+        if sub:
+            sub.last_activity_at = datetime.now()
+            await session.commit()
+            logging.info("Пользователь %s активен в канале %s", user_id, channel_id)
+            return
+
+        await add_channel_subscriber(
+            channel_id=channel_id,
+            user_id=user_id,
+            username=username,
+            first_name=first_name,
+            full_name=full_name,
+        )
+        logging.info("Добавлен новый подписчик %s в канале %s", user_id, channel_id)
+
+
+async def get_active_subscribers(channel_id: int, days: int = 30) -> List[ChannelSubscriber]:
+    """
+    Возвращает пользователей, которые были активны за последние N дней.
+    Активность — участие в розыгрыше или комментарий.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    async with get_session() as session:
+        stmt = select(ChannelSubscriber).where(
+            ChannelSubscriber.channel_id == channel_id,
+            ChannelSubscriber.left_at.is_(None),
+            ChannelSubscriber.last_activity_at >= cutoff
+        )
+        result = await session.execute(stmt)
+        return result.scalars().all()
 
 
 async def remove_channel_subscriber(channel_id: int, user_id: int) -> bool:
@@ -638,6 +691,17 @@ async def was_user_subscriber(channel_id: int, user_id: int, at_time: datetime) 
 async def get_channel(channel_id: int) -> Optional[Channel]:
     async with async_session() as session:
         result = await session.execute(
-            select(Channel).where(Channel.id == channel_id)
+            select(Channel)
+            .options(selectinload(Channel.admin))  # ← Загружаем админа!
+            .where(Channel.channel_id == channel_id)
+        )
+        return result.scalar_one_or_none()
+
+async def get_channel_for_discussion_group(discussion_group_id: int) -> Optional[Channel]:
+    """Получает основой канал для по discussion_group_id"""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Channel).
+            where(Channel.discussion_group_id == discussion_group_id)
         )
         return result.scalar_one_or_none()

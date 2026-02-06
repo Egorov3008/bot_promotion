@@ -17,7 +17,7 @@ async def main():
     """Основная функция запуска бота"""
     # Настройка логирования
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler('bot.log', encoding='utf-8'),
@@ -60,7 +60,7 @@ async def main():
         logging.info("Бот запущен!")
         await dp.start_polling(
             bot,
-            # allowed_updates=["message", "callback_query", "chat_member", "message_reaction"]
+            allowed_updates=["message", "callback_query", "chat_member", "message_reaction"]
         )
     finally:
         await bot.session.close()

@@ -2,12 +2,15 @@ import logging
 import logging
 import random
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 
+from config import config
 from database.database import get_active_giveaways, finish_giveaway, get_participants, delete_finished_older_than, \
     get_participants_count, get_channel, get_giveaway
+from database.models import Channel
 from texts.messages import REMINDER_POST_TEMPLATE, MESSAGES
 from utils.datetime_utils import format_datetime
 from utils.keyboards import get_participate_keyboard, get_winers_keyboard
@@ -258,7 +261,7 @@ async def finish_giveaway_task(bot, giveaway_id: int):
             winner_places = len(relevant_participants)
 
         winners = random.sample(relevant_participants, winner_places)
-        channel = await get_channel(giveaway.channel_id)
+        channel: Optional[Channel] = await get_channel(giveaway.channel_id)
         winners_data = []
         winners_list = []
 
@@ -287,6 +290,7 @@ async def finish_giveaway_task(bot, giveaway_id: int):
                 "🎊 <b>РОЗЫГРЫШ ЗАВЕРШЕН!</b>\n\n" + "\n".join(winners_list) + "\n\n🎉 Поздравляем!"
         )
         keyboard_admin = await get_winers_keyboard(winners_data)
+
         try:
             await bot.send_message(
                 chat_id=giveaway.channel_id,
@@ -295,16 +299,24 @@ async def finish_giveaway_task(bot, giveaway_id: int):
                 reply_to_message_id=giveaway.message_id if giveaway.message_id else None
             )
             logging.debug(f"Отправлено сообщение о победителе для розыгрыша #{giveaway_id}")
-            await bot.send_message(
-                chat_id=channel.admin,
-                text=MESSAGES.get("result_giveaway").format(winner="\n".join(winners_list)),
-                reply_markup=keyboard_admin
-            )
-            logging.debug(f"Отправлено сообщение об итогах для администратора канала {channel.admin}")
-            logging.info(f"Розыгрыш #{giveaway_id} завершен. Итоги опубликованы.")
 
         except Exception as e:
             logging.error(f"Ошибка отправки сообщения о победителе: {e}")
+
+        admin_id = channel.admin.user_id
+        if not channel.admin:
+            logging.error(f"Администратор канала {channel.id} не найден")
+            admin_id = config.MAIN_ADMIN_ID
+
+        await bot.send_message(
+                chat_id=admin_id,
+                text=MESSAGES.get("result_giveaway").format(winner="\n".join(winners_list)),
+                reply_markup=keyboard_admin
+            )
+        logging.debug(f"Отправлено сообщение об итогах для администратора канала {channel.admin}")
+        logging.info(f"Розыгрыш #{giveaway_id} завершен. Итоги опубликованы.")
+
+
 
     except Exception as e:
         logging.error(f"Ошибка при завершении розыгрыша #{giveaway_id}: {e}")
