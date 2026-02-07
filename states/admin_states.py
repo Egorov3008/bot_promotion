@@ -10,6 +10,7 @@ class CreateGiveawayStates(StatesGroup):
     """Состояния для создания розыгрыша"""
     WAITING_TITLE = State()         # Ожидание заголовка
     WAITING_DESCRIPTION = State()   # Ожидание описания
+    WAITING_MESSAGE_WINNERS = State()       # Ожидание сообщения победителям
     WAITING_MEDIA = State()         # Ожидание медиа (фото/видео/гиф)
     WAITING_WINNER_PLACES = State() # Ожидание количества призовых мест
     WAITING_CHANNEL = State()       # Выбор канала
@@ -25,7 +26,9 @@ class EditGiveawayStates(StatesGroup):
     WAITING_NEW_DESCRIPTION = State()  # Новое описание
     WAITING_NEW_MEDIA = State()     # Новое медиа
     WAITING_NEW_END_TIME = State()  # Новое время окончания
-    CONFIRM_EDIT = State()          # Подтверждение изменений
+    CONFIRM_EDIT = State()
+    WAITING_NEW_MESSAGE_WINNER = State()
+    # Подтверждение изменений
 
 
 class AdminManagementStates(StatesGroup):
@@ -52,3 +55,5 @@ class ViewGiveawaysStates(StatesGroup):
     CHOOSING_TYPE = State()         # Выбор типа (активные/завершенные)
     VIEWING_LIST = State()          # Просмотр списка
     VIEWING_DETAILS = State()       # Просмотр деталей конкретного розыгрыша
+
+

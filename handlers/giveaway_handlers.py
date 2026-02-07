@@ -46,30 +46,45 @@ async def callback_create_giveaway(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+
 @router.message(StateFilter(CreateGiveawayStates.WAITING_TITLE))
 async def process_giveaway_title(message: Message, state: FSMContext):
     """Обработка заголовка розыгрыша"""
     title = (message.html_text or message.text or "").strip()
-    
+
     if len(title) > 255:
         await message.answer(MESSAGES["title_too_long"])
         return
-    
+
     await state.update_data(title=title)
     await state.set_state(CreateGiveawayStates.WAITING_DESCRIPTION)
     await message.answer(MESSAGES["enter_description"])
-
 
 @router.message(StateFilter(CreateGiveawayStates.WAITING_DESCRIPTION))
 async def process_giveaway_description(message: Message, state: FSMContext):
     """Обработка описания розыгрыша"""
     description = (message.html_text or message.text or "").strip()
-    
+
     if len(description) > 4000:
         await message.answer(MESSAGES["description_too_long"])
         return
-    
+
     await state.update_data(description=description)
+    await state.set_state(CreateGiveawayStates.WAITING_MESSAGE_WINNERS)
+    await message.answer(
+        MESSAGES["enter_message_winner"],
+        reply_markup=get_back_to_menu_keyboard()
+    )
+
+
+@router.message(StateFilter(CreateGiveawayStates.WAITING_MESSAGE_WINNERS))
+async def process_message_winners(message: Message, state: FSMContext):
+    """Обработка сообщения для победителей"""
+    message_winner = (message.html_text or message.text or "").strip()
+    if len(message_winner) > 4000:
+        await message.answer(MESSAGES["message_winners_too_long"])
+        return
+    await state.update_data(message_winner=message_winner)
     await state.set_state(CreateGiveawayStates.WAITING_MEDIA)
     await message.answer(
         MESSAGES["enter_media"],
@@ -196,7 +211,8 @@ async def process_end_time(message: Message, state: FSMContext):
         
         confirmation_text = MESSAGES["confirm_giveaway"].format(
             title=data["title"],
-            description=data["description"][:100] + "..." if len(data["description"]) > 100 else data["description"],
+            description=data["description"][:50] + "..." if len(data["description"]) > 50 else data["description"],
+            message_winner=data["message_winner"][:50] + "..." if len(data["message_winner"]) > 50 else data["message_winner"],
             winner_places=data.get("winner_places", 1),
             channel=channel_name,
             end_time=format_datetime(end_time),
@@ -223,6 +239,7 @@ async def confirm_create_giveaway(callback: CallbackQuery, state: FSMContext):
         giveaway = await create_giveaway(
             title=data["title"],
             description=data["description"],
+            message_winner=data["message_winner"],
             end_time=data["end_time"],
             channel_id=data["channel_id"],
             created_by=callback.from_user.id,
@@ -555,6 +572,39 @@ async def callback_edit_giveaway(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_edit_fields_keyboard()
     )
     await callback.answer()
+
+@router.callback_query(F.data == "edit_field_message_winner", StateFilter(EditGiveawayStates.CHOOSING_FIELD))
+async def callback_edit_field_message_winner(callback: CallbackQuery, state: FSMContext):
+    """Переход к редактированию сообщения для победителей"""
+    await state.set_state(EditGiveawayStates.WAITING_NEW_MESSAGE_WINNER)
+    await callback.message.edit_text(
+        MESSAGES["enter_new_message_winner"],
+        reply_markup=get_back_to_menu_keyboard()
+    )
+    await callback.answer()
+
+@router.message(StateFilter(EditGiveawayStates.WAITING_NEW_MESSAGE_WINNER))
+async def process_new_message_winner(message: Message, state: FSMContext):
+    """Обработка нового сообщения для победителей"""
+    message_winner = (message.html_text or message.text or "").strip()
+
+    if len(message_winner) > 4000:
+        await message.answer(MESSAGES["message_winners_too_long"])
+        return
+
+    data = await state.get_data()
+    giveaway_id = data["edit_giveaway_id"]
+
+    # Обновляем в БД
+    updated = await update_giveaway_fields(giveaway_id, message_winner=message_winner)
+
+    if updated:
+        await message.answer(MESSAGES["giveaway_updated"], reply_markup=get_back_to_menu_keyboard())
+    else:
+        await message.answer(MESSAGES["error_occurred"], reply_markup=get_back_to_menu_keyboard())
+
+    # Возвращаемся к выбору поля
+    await state.set_state(EditGiveawayStates.CHOOSING_FIELD)
 
 
 @router.callback_query(F.data == "edit_field_title", StateFilter(EditGiveawayStates.CHOOSING_FIELD))

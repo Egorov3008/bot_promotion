@@ -75,6 +75,7 @@ class Giveaway(Base):
     id = Column(Integer, primary_key=True)
     title = Column(String(255), nullable=False)  # Заголовок розыгрыша
     description = Column(Text, nullable=False)    # Описание розыгрыша
+    message_winner = Column(Text, nullable=True)  # Сообщение победителю
     
     # Медиа файлы
     media_type = Column(String(50), nullable=True)  # photo, video, animation, document
@@ -144,3 +145,5 @@ class Winner(Base):
     __table_args__ = (
         {'sqlite_autoincrement': True},
     )
+
+

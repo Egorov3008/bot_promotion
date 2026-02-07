@@ -1,10 +1,15 @@
 import logging
-from typing import Optional
+
 from aiogram import Dispatcher, Router, F
-from aiogram.types import Message, CallbackQuery
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message, CallbackQuery
 
+from database.database import (
+    get_all_admins, add_admin, remove_admin,
+    get_all_channels, add_channel, remove_channel, add_channel_by_username,
+    is_admin
+)
 from states.admin_states import (
     AdminManagementStates, ChannelManagementStates,
     ViewGiveawaysStates
@@ -15,11 +20,6 @@ from utils.keyboards import (
     get_channel_management_keyboard, get_channels_list_keyboard,
     get_back_to_menu_keyboard, get_confirm_keyboard,
     get_giveaway_types_keyboard, get_add_channel_method_keyboard
-)
-from database.database import (
-    get_all_admins, add_admin, remove_admin,
-    get_all_channels, add_channel, remove_channel, add_channel_by_username,
-    get_active_giveaways, get_finished_giveaways, is_admin
 )
 
 router = Router()
@@ -41,11 +41,11 @@ async def callback_admin_management(callback: CallbackQuery, state: FSMContext):
 async def callback_view_admins(callback: CallbackQuery):
     """Просмотр списка администраторов"""
     admins = await get_all_admins()
-    
+
     if not admins:
         await callback.answer("👥 Администраторов не найдено", show_alert=True)
         return
-    
+
     admin_list = []
     for admin in admins:
         admin_info = ADMIN_USER_ITEM.format(
@@ -56,9 +56,9 @@ async def callback_view_admins(callback: CallbackQuery):
         if admin.is_main_admin:
             admin_info += "\n👑 <b>Главный администратор</b>"
         admin_list.append(admin_info)
-    
+
     admin_text = MESSAGES["current_admins"].format(admins="\n\n".join(admin_list))
-    
+
     await callback.message.edit_text(
         admin_text,
         reply_markup=get_admins_list_keyboard(admins, "view")
@@ -75,7 +75,6 @@ async def callback_add_admin(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_back_to_menu_keyboard()
     )
     await callback.answer()
-
 
 
 @router.message(StateFilter(AdminManagementStates.WAITING_NEW_ADMIN_ID))
@@ -162,13 +161,13 @@ async def _save_admin_and_confirm(message: Message, state: FSMContext, user_id: 
 async def confirm_add_admin(callback: CallbackQuery, state: FSMContext):
     """Подтверждение добавления администратора"""
     data = await state.get_data()
-    
+
     success = await add_admin(
         user_id=data["new_admin_id"],
         username=data.get("new_admin_username"),
         first_name=data.get("new_admin_name")
     )
-    
+
     if success:
         await callback.message.edit_text(
             MESSAGES["admin_added"],
@@ -179,7 +178,7 @@ async def confirm_add_admin(callback: CallbackQuery, state: FSMContext):
             MESSAGES["admin_already_exists"],
             reply_markup=get_back_to_menu_keyboard()
         )
-    
+
     await state.set_state(AdminManagementStates.MAIN_ADMIN_MENU)
     await callback.answer()
 
@@ -189,11 +188,11 @@ async def callback_remove_admin(callback: CallbackQuery, state: FSMContext):
     """Выбор администратора для удаления"""
     admins = await get_all_admins()
     removable_admins = [admin for admin in admins if not admin.is_main_admin]
-    
+
     if not removable_admins:
         await callback.answer("Нет администраторов для удаления", show_alert=True)
         return
-    
+
     await state.set_state(AdminManagementStates.CHOOSING_ADMIN_TO_REMOVE)
     await callback.message.edit_text(
         MESSAGES["choose_admin_to_remove"],
@@ -206,26 +205,26 @@ async def callback_remove_admin(callback: CallbackQuery, state: FSMContext):
 async def callback_confirm_remove_admin(callback: CallbackQuery, state: FSMContext):
     """Подтверждение удаления администратора"""
     user_id = int(callback.data.split("_")[2])
-    
+
     # Получаем информацию об админе
     admins = await get_all_admins()
     admin_to_remove = next((admin for admin in admins if admin.user_id == user_id), None)
-    
+
     if not admin_to_remove:
         await callback.answer("Администратор не найден", show_alert=True)
         return
-    
+
     if admin_to_remove.is_main_admin:
         await callback.answer(MESSAGES["cannot_remove_main_admin"], show_alert=True)
         return
-    
+
     await state.update_data(remove_admin_id=user_id)
     await state.set_state(AdminManagementStates.CONFIRM_REMOVE_ADMIN)
-    
+
     admin_name = admin_to_remove.first_name or f"ID: {user_id}"
     if admin_to_remove.username:
         admin_name += f" (@{admin_to_remove.username})"
-    
+
     await callback.message.edit_text(
         MESSAGES["confirm_remove_admin"].format(admin=admin_name),
         reply_markup=get_confirm_keyboard()
@@ -238,9 +237,9 @@ async def confirm_remove_admin(callback: CallbackQuery, state: FSMContext):
     """Окончательное удаление администратора"""
     data = await state.get_data()
     user_id = data["remove_admin_id"]
-    
+
     success = await remove_admin(user_id)
-    
+
     if success:
         await callback.message.edit_text(
             MESSAGES["admin_removed"],
@@ -251,7 +250,7 @@ async def confirm_remove_admin(callback: CallbackQuery, state: FSMContext):
             MESSAGES["error_occurred"],
             reply_markup=get_back_to_menu_keyboard()
         )
-    
+
     await state.set_state(AdminManagementStates.MAIN_ADMIN_MENU)
     await callback.answer()
 
@@ -272,11 +271,11 @@ async def callback_channel_management(callback: CallbackQuery, state: FSMContext
 async def callback_view_channels(callback: CallbackQuery):
     """Просмотр списка каналов"""
     channels = await get_all_channels()
-    
+
     if not channels:
         await callback.answer("📺 Каналов не найдено", show_alert=True)
         return
-    
+
     channel_list = []
     for channel in channels:
         # Получаем информацию об админе, который добавил канал
@@ -285,16 +284,16 @@ async def callback_view_channels(callback: CallbackQuery):
             admin_name = channel.admin.first_name or f"ID: {channel.added_by}"
             if channel.admin.username:
                 admin_name += f" (@{channel.admin.username})"
-        
+
         channel_info = ADMIN_CHANNEL_ITEM.format(
             name=channel.channel_name,
             username=f"@{channel.channel_username}" if channel.channel_username else "Без username",
             admin=admin_name
         )
         channel_list.append(channel_info)
-    
+
     channel_text = MESSAGES["current_channels"].format(channels="\n\n".join(channel_list))
-    
+
     await callback.message.edit_text(
         channel_text,
         reply_markup=get_channels_list_keyboard(channels, "view")
@@ -339,26 +338,27 @@ async def callback_add_channel_by_forward(callback: CallbackQuery, state: FSMCon
 async def process_channel_link(message: Message, state: FSMContext):
     """Обработка ссылки на канал"""
     current_state = await state.get_state()
-    logging.info(f"[FSM] process_channel_link вызван. message={message.text!r}, user={message.from_user.id}, state={current_state}")
+    logging.info(
+        f"[FSM] process_channel_link вызван. message={message.text!r}, user={message.from_user.id}, state={current_state}")
     if current_state != ChannelManagementStates.WAITING_CHANNEL_LINK.state:
         await message.answer("❌ Ошибка состояния. Попробуйте начать добавление канала заново через меню.")
         return
     channel_input = message.text.strip()
-    
+
     # Добавляем канал по username/ссылке
     success, result_message = await add_channel_by_username(
         channel_username=channel_input,
         bot=message.bot,
         added_by=message.from_user.id
     )
-    
+
     # Логирование
     logging.info(f"[FSM] Добавление канала по ссылке: success={success}, msg={result_message}")
-    
+
     # Гарантированный ответ
     if not result_message:
         result_message = "✅ Канал добавлен!" if success else "❌ Ошибка при добавлении канала. Попробуйте ещё раз."
-    
+
     await message.answer(
         result_message,
         reply_markup=get_back_to_menu_keyboard()
@@ -373,13 +373,13 @@ async def process_channel_info(message: Message, state: FSMContext):
     if not message.forward_from_chat:
         await message.answer("❌ Пожалуйста, перешлите сообщение из канала")
         return
-    
+
     channel = message.forward_from_chat
-    
+
     if channel.type != "channel":
         await message.answer("❌ Это не канал!")
         return
-    
+
     # Проверяем, является ли бот администратором канала
     try:
         bot_member = await message.bot.get_chat_member(channel.id, message.bot.id)
@@ -389,7 +389,7 @@ async def process_channel_info(message: Message, state: FSMContext):
     except Exception as e:
         await message.answer(MESSAGES["bot_not_admin"])
         return
-    
+
     # Сохраняем данные канала
     await state.update_data(
         channel_id=channel.id,
@@ -397,7 +397,7 @@ async def process_channel_info(message: Message, state: FSMContext):
         channel_username=channel.username
     )
     await state.set_state(ChannelManagementStates.CONFIRM_ADD_CHANNEL)
-    
+
     # Явный ответ
     await message.answer(
         MESSAGES["confirm_add_channel"].format(channel=channel.title),
@@ -410,14 +410,14 @@ async def process_channel_info(message: Message, state: FSMContext):
 async def confirm_add_channel(callback: CallbackQuery, state: FSMContext):
     """Подтверждение добавления канала"""
     data = await state.get_data()
-    
+
     success = await add_channel(
         channel_id=data["channel_id"],
         channel_name=data["channel_name"],
         channel_username=data["channel_username"],
         added_by=callback.from_user.id
     )
-    
+
     if success:
         await callback.message.edit_text(
             MESSAGES["channel_added"],
@@ -428,7 +428,7 @@ async def confirm_add_channel(callback: CallbackQuery, state: FSMContext):
             MESSAGES["channel_already_exists"],
             reply_markup=get_back_to_menu_keyboard()
         )
-    
+
     await state.set_state(ChannelManagementStates.MAIN_CHANNEL_MENU)
     await callback.answer()
 
@@ -437,11 +437,11 @@ async def confirm_add_channel(callback: CallbackQuery, state: FSMContext):
 async def callback_remove_channel(callback: CallbackQuery, state: FSMContext):
     """Выбор канала для удаления"""
     channels = await get_all_channels()
-    
+
     if not channels:
         await callback.answer("Нет каналов для удаления", show_alert=True)
         return
-    
+
     await state.set_state(ChannelManagementStates.CHOOSING_CHANNEL_TO_REMOVE)
     await callback.message.edit_text(
         MESSAGES["choose_channel_to_remove"],
@@ -450,22 +450,23 @@ async def callback_remove_channel(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("remove_channel_"), StateFilter(ChannelManagementStates.CHOOSING_CHANNEL_TO_REMOVE))
+@router.callback_query(F.data.startswith("remove_channel_"),
+                       StateFilter(ChannelManagementStates.CHOOSING_CHANNEL_TO_REMOVE))
 async def callback_confirm_remove_channel(callback: CallbackQuery, state: FSMContext):
     """Подтверждение удаления канала"""
     channel_id = int(callback.data.split("_")[2])
-    
+
     # Получаем информацию о канале
     channels = await get_all_channels()
     channel_to_remove = next((ch for ch in channels if ch.channel_id == channel_id), None)
-    
+
     if not channel_to_remove:
         await callback.answer("Канал не найден", show_alert=True)
         return
-    
+
     await state.update_data(remove_channel_id=channel_id)
     await state.set_state(ChannelManagementStates.CONFIRM_REMOVE_CHANNEL)
-    
+
     await callback.message.edit_text(
         MESSAGES["confirm_remove_channel"].format(channel=channel_to_remove.channel_name),
         reply_markup=get_confirm_keyboard()
@@ -478,9 +479,9 @@ async def confirm_remove_channel(callback: CallbackQuery, state: FSMContext):
     """Окончательное удаление канала"""
     data = await state.get_data()
     channel_id = data["remove_channel_id"]
-    
+
     success = await remove_channel(channel_id)
-    
+
     if success:
         await callback.message.edit_text(
             MESSAGES["channel_removed"],
@@ -491,7 +492,7 @@ async def confirm_remove_channel(callback: CallbackQuery, state: FSMContext):
             MESSAGES["error_occurred"],
             reply_markup=get_back_to_menu_keyboard()
         )
-    
+
     await state.set_state(ChannelManagementStates.MAIN_CHANNEL_MENU)
     await callback.answer()
 

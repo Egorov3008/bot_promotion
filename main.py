@@ -33,7 +33,8 @@ async def main():
         token=config.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
-    
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+
     # Устанавливаем команды бота
     try:
         await bot.set_my_commands([

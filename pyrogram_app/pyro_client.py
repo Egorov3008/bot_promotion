@@ -6,7 +6,7 @@ import logging
 class PyrogramClient:
     def __init__(self, config):
         self.config = config
-        self.app = Client(
+        self.app: Client = Client(
             name=config.SESSION_NAME,
             api_id=config.API_ID,
             api_hash=config.API_HASH,
@@ -20,6 +20,9 @@ class PyrogramClient:
 
     async def start(self):
         """Запуск Pyrogram клиента"""
+        if self.is_running:
+            logging.warning("Pyrogram клиент уже запущен.")
+            return
         try:
             await self.app.start()
             self.is_running = True
@@ -38,6 +41,7 @@ class PyrogramClient:
     async def send_message(self, chat_id, text: str, parse_mode=None):
         """Отправка сообщения через Pyrogram"""
         if not self.is_running:
+            logging.error("❌ Pyrogram клиент не запущен. Невозможно отправить сообщение.")
             return False
         try:
             await self.app.send_message(chat_id, text, parse_mode=parse_mode)
@@ -62,32 +66,22 @@ class PyrogramClient:
         """
         Обработчик 'сырых' обновлений — ловим изменения реакций.
         """
+        logging.debug(f"🔍 Обработка raw_update: {type(update)}")
         try:
-            # Фильтруем только обновления реакций
             if isinstance(update, UpdateMessageReactions):
                 chat_id = int(f"-100{update.peer.channel_id}") if hasattr(update.peer, 'channel_id') else update.peer.user_id
                 message_id = update.msg_id
                 reactions = update.reactions
 
-                # Парсим список пользователей, поставивших реакции
                 reacted_users = []
-
                 for r in reactions.results:
-                    # r.peer_ids — список ID пользователей, поставивших эту реакцию
                     if hasattr(r, 'peer_ids') and r.peer_ids:
                         reacted_users.extend([peer_id.user_id for peer_id in r.peer_ids])
-                    elif hasattr(r, 'peer_emoticon'):
-                        # Это может быть анонимная реакция или кастомная
-                        pass
 
-                # Логируем событие
                 logging.info(
-                    f"🔄 Обновление реакций: "
-                    f"чат={chat_id}, сообщение={message_id}, "
+                    f"🔄 Обновление реакций: чат={chat_id}, сообщение={message_id}, "
                     f"реакции={len(reacted_users)} пользователей"
                 )
-
-                # Здесь можно вызвать вашу логику: сохранить активность
                 for user_id in reacted_users:
                     logging.info(f"✅ Пользователь {user_id} проявил активность в сообщении {message_id}")
 
@@ -95,15 +89,29 @@ class PyrogramClient:
             logging.error(f"❌ Ошибка в обработчике raw_update (реакции): {e}")
 
     async def export(self):
-        """Возвращает экземпляр клиента (для кастомных операций)"""
+        """Возвращает внутренний экземпляр Client (если нужно)"""
         return self.app
 
 
 # Глобальный экземпляр
-pyro_client = None
+_instance: PyrogramClient | None = None
 
 
 def setup_pyrogram(config) -> PyrogramClient:
-    global pyro_client
-    pyro_client = PyrogramClient(config)
-    return pyro_client
+    """
+    Возвращает единственный экземпляр PyrogramClient.
+    Создаёт новый только если ещё не создан.
+    """
+    global _instance
+    if _instance is None:
+        _instance = PyrogramClient(config)
+    return _instance
+
+
+def get_pyrogram_client() -> PyrogramClient:
+    """
+    Получить готовый запущенный клиент (удобно для использования в других модулях).
+    """
+    if _instance is None:
+        raise RuntimeError("PyrogramClient ещё не инициализирован. Вызовите setup_pyrogram(config) сначала.")
+    return _instance

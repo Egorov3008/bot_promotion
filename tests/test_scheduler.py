@@ -189,34 +189,44 @@ class TestScheduler:
     async def test_finish_giveaway_task_with_participants(self):
         """Тест завершения розыгрыша с участниками"""
         bot = create_bot_mock()
-        giveaway = create_mock_giveaway(id=1, winner_places=2)
+        giveaway = create_mock_giveaway(id=1, winner_places=2, message_winner="Специальное сообщение для победителей")
         participant1 = create_mock_participant(user_id=1, username="user1", first_name="Alice")
         participant2 = create_mock_participant(user_id=2, username="user2", first_name="Bob")
 
-        # ✅ Мокаем по реальному пути
-        with patch('utils.scheduler.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
-            with patch('utils.scheduler.get_participants', new_callable=AsyncMock,
-                       return_value=[participant1, participant2]):
-                with patch('utils.scheduler.check_user_subscription', new_callable=AsyncMock, return_value=True):
-                    with patch('utils.scheduler.get_channel', new_callable=AsyncMock) as mock_get_channel:
-                        with patch('utils.scheduler.finish_giveaway', new_callable=AsyncMock) as mock_finish:
-                            # Мокаем результат get_channel
-                            channel_mock = MagicMock()
-                            channel_mock.admin = 987654321
-                            mock_get_channel.return_value = channel_mock
+        # Мокаем клиента Pyrogram
+        with patch('utils.scheduler.get_pyrogram_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.is_running = True
+            mock_client.send_message = AsyncMock(return_value=MagicMock(id=123))
+            mock_get_client.return_value = mock_client
 
-                            await finish_giveaway_task(bot, 1)
+            # ✅ Мокаем по реальному пути
+            with patch('utils.scheduler.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
+                with patch('utils.scheduler.get_participants', new_callable=AsyncMock,
+                           return_value=[participant1, participant2]):
+                    with patch('utils.scheduler.check_user_subscription', new_callable=AsyncMock, return_value=True):
+                        with patch('utils.scheduler.get_channel', new_callable=AsyncMock) as mock_get_channel:
+                            with patch('utils.scheduler.finish_giveaway', new_callable=AsyncMock) as mock_finish:
+                                # Мокаем результат get_channel
+                                channel_mock = MagicMock()
+                                channel_mock.admin = 987654321
+                                mock_get_channel.return_value = channel_mock
 
-                            mock_finish.assert_called_once()
-                            assert bot.send_message.call_count == 2
-                            # Первое сообщение - в канал
-                            channel_call = bot.send_message.call_args_list[0][1]
-                            assert "@user1" in channel_call["text"]
-                            assert "🥇 <b>1 место:</b> @user1" in channel_call["text"]
-                            assert channel_call["parse_mode"] == "HTML"
-                            # Второе сообщение - администратору
-                            admin_call = bot.send_message.call_args_list[1][1]
-                            assert admin_call["chat_id"] == 987654321
+                                await finish_giveaway_task(bot, 1)
+
+                                mock_finish.assert_called_once()
+                                assert bot.send_message.call_count == 2
+                                # Первое сообщение - в канал
+                                channel_call = bot.send_message.call_args_list[0][1]
+                                assert "@user1" in channel_call["text"]
+                                assert "🥇 <b>1 место:</b> @user1" in channel_call["text"]
+                                assert channel_call["parse_mode"] == "HTML"
+                                # Проверка отправки сообщения победителю через Pyrogram
+                                mock_client.send_message.assert_called_once_with(1, "Специальное сообщение для победителей")
+                                # Второе сообщение - администратору
+                                admin_call = bot.send_message.call_args_list[1][1]
+                                assert admin_call["chat_id"] == 987654321
+                                assert "✅ Успешно" in admin_call["text"]
 
     @pytest.mark.asyncio
     async def test_finish_giveaway_task_without_participants(self):
@@ -224,15 +234,23 @@ class TestScheduler:
         bot = create_bot_mock()
         giveaway = create_mock_giveaway(id=1)
 
-        # ✅ Мокаем по реальному пути
-        with patch('utils.scheduler.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
-            with patch('utils.scheduler.get_participants', new_callable=AsyncMock, return_value=[]):
-                with patch('utils.scheduler.finish_giveaway', new_callable=AsyncMock) as mock_finish:
-                    await finish_giveaway_task(bot, 1)
+        # Мокаем клиента Pyrogram
+        with patch('utils.scheduler.get_pyrogram_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.is_running = True
+            mock_get_client.return_value = mock_client
 
-                    bot.send_message.assert_called_once()
-                    call_args = bot.send_message.call_args[1]
-                    assert "К сожалению" in call_args["text"]
+            # ✅ Мокаем по реальному пути
+            with patch('utils.scheduler.get_giveaway', new_callable=AsyncMock, return_value=giveaway):
+                with patch('utils.scheduler.get_participants', new_callable=AsyncMock, return_value=[]):
+                    with patch('utils.scheduler.finish_giveaway', new_callable=AsyncMock) as mock_finish:
+                        await finish_giveaway_task(bot, 1)
+
+                        bot.send_message.assert_called_once()
+                        call_args = bot.send_message.call_args[1]
+                        assert "К сожалению" in call_args["text"]
+                        # Проверяем, что Pyrogram не использовался
+                        mock_client.send_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_cleanup_old_finished(self):
@@ -240,7 +258,7 @@ class TestScheduler:
         with patch('utils.scheduler.delete_finished_older_than', new_callable=AsyncMock, return_value=5):
             with patch('utils.scheduler.logging.info') as mock_info:
                 await cleanup_old_finished(15)
-                mock_info.assert_called_with("Очищено завершенных розыгрышей: 5 (старше 15 дней)")
+                mock_info.assert_called_with("Очищено 5 завершённых розыгрышей (старше 15 дней)")
 
     def test_get_scheduler_status(self):
         """Тест получения статуса планировщика"""

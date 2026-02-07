@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database.models import Giveaway, Channel, Admin, Winner
+from database.models import Giveaway, Channel, Admin
 from texts.messages import BUTTONS
 
 
@@ -148,6 +148,9 @@ def get_edit_fields_keyboard() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text=BUTTONS["edit_description"], callback_data="edit_field_description")
+    )
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["message_winner"], callback_data="edit_message_winner")
     )
     builder.row(
         InlineKeyboardButton(text=BUTTONS["edit_media"], callback_data="edit_field_media")

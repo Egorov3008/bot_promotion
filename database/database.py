@@ -233,7 +233,7 @@ async def remove_channel(channel_id: int) -> bool:
 
 
 # Функции для работы с розыгрышами
-async def create_giveaway(title: str, description: str, end_time,
+async def create_giveaway(title: str, description: str, message_winner: str, end_time,
                           channel_id: int, created_by: int, winner_places: int = 1,
                           media_type: str = None, media_file_id: str = None) -> Optional[Giveaway]:
     """Создание нового розыгрыша"""
@@ -241,6 +241,7 @@ async def create_giveaway(title: str, description: str, end_time,
         giveaway = Giveaway(
             title=title,
             description=description,
+            message_winner=message_winner,
             end_time=end_time,
             channel_id=channel_id,
             created_by=created_by,
