@@ -82,7 +82,7 @@ async def handle_comment(message: types.Message):
     logging.debug(f"Активность пользователя {user.id} в группе обсуждений {channel.channel_id}")
 
 
-@router.message_reaction()
+@router.message
 async def handle_reaction(update: MessageReactionUpdated):
     """
     Обработка изменений реакций (Bot API 7.0+).

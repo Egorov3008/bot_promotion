@@ -11,7 +11,7 @@ from database.database import init_db
 from handlers import setup_handlers
 from middlewares.auth import AdminMiddleware
 from utils.scheduler import setup_scheduler
-from utils.pyro_client import setup_pyrogram, pyro_client
+from pyrogram_app.pyro_client import setup_pyrogram, pyro_client
 
 
 async def main():
