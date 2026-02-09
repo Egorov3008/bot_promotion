@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 from aiogram.types import CallbackQuery, Message, Update
 from aiogram.fsm.context import FSMContext
 
-from handlers.basic_handlers import router, get_participants_count, get_giveaway, update_giveaway_message_id, is_admin, \
+from handlers.basic_handlers import router, get_participants_count, get_giveaway, is_admin, \
     cmd_start, cmd_clear, cmd_admin, callback_main_menu, callback_participate, handle_unknown_message
 
 

@@ -1,25 +1,37 @@
+import asyncio
 import logging
+from datetime import datetime
+from typing import Optional
 
 from aiogram import Dispatcher, Router, F
-from aiogram.filters import StateFilter
+from aiogram.filters import StateFilter, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
 from database.database import (
     get_all_admins, add_admin, remove_admin,
     get_all_channels, add_channel, remove_channel, add_channel_by_username,
-    is_admin
+    is_admin, get_channel, bulk_add_channel_subscribers,
+    get_channel_subscribers_stats, clear_channel_subscribers
 )
+from database.models import Channel
+from pyrogram_app.pyro_client import PyrogramClient
 from states.admin_states import (
     AdminManagementStates, ChannelManagementStates,
-    ViewGiveawaysStates
+    ViewGiveawaysStates, ChannelParsingStates
 )
 from texts.messages import MESSAGES, ADMIN_USER_ITEM, ADMIN_CHANNEL_ITEM
 from utils.keyboards import (
     get_admin_management_keyboard, get_admins_list_keyboard,
     get_channel_management_keyboard, get_channels_list_keyboard,
     get_back_to_menu_keyboard, get_confirm_keyboard,
-    get_giveaway_types_keyboard, get_add_channel_method_keyboard
+    get_giveaway_types_keyboard, get_add_channel_method_keyboard,
+    get_start_parsing_keyboard, get_parsing_progress_keyboard,
+    get_parsing_result_keyboard, get_cancel_parsing_keyboard,
+    get_channel_parsing_actions_keyboard
+)
+from utils.channel_parser import (
+    parse_channel_subscribers, check_pyrogram_client_admin_rights, get_pyrogram_client
 )
 
 router = Router()
@@ -408,7 +420,7 @@ async def process_channel_info(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "confirm", StateFilter(ChannelManagementStates.CONFIRM_ADD_CHANNEL))
 async def confirm_add_channel(callback: CallbackQuery, state: FSMContext):
-    """Подтверждение добавления канала"""
+    """Подтверждение добавления канала с предложением парсинга"""
     data = await state.get_data()
 
     success = await add_channel(
@@ -419,17 +431,26 @@ async def confirm_add_channel(callback: CallbackQuery, state: FSMContext):
     )
 
     if success:
+        # Показываем сообщение о добавлении канала с предложением парсинга
+        channel_display = f"@{data['channel_username']}" if data.get("channel_username") else data["channel_name"]
         await callback.message.edit_text(
-            MESSAGES["channel_added"],
-            reply_markup=get_back_to_menu_keyboard()
+            MESSAGES["channel_added_parsing_prompt"].format(channel=channel_display),
+            reply_markup=get_start_parsing_keyboard()
         )
+        # Сохраняем данные для парсинга в состояние
+        await state.update_data(
+            channel_id=data["channel_id"],
+            channel_name=data["channel_name"],
+            channel_username=data["channel_username"]
+        )
+        # НЕ переходим в MAIN_CHANNEL_MENU, остаемся для выбора парсинга
     else:
         await callback.message.edit_text(
             MESSAGES["channel_already_exists"],
             reply_markup=get_back_to_menu_keyboard()
         )
+        await state.set_state(ChannelManagementStates.MAIN_CHANNEL_MENU)
 
-    await state.set_state(ChannelManagementStates.MAIN_CHANNEL_MENU)
     await callback.answer()
 
 
@@ -476,9 +497,13 @@ async def callback_confirm_remove_channel(callback: CallbackQuery, state: FSMCon
 
 @router.callback_query(F.data == "confirm", StateFilter(ChannelManagementStates.CONFIRM_REMOVE_CHANNEL))
 async def confirm_remove_channel(callback: CallbackQuery, state: FSMContext):
-    """Окончательное удаление канала"""
+    """Окончательное удаление канала с очисткой подписчиков"""
     data = await state.get_data()
     channel_id = data["remove_channel_id"]
+
+    # Очищаем подписчиков канала перед удалением
+    cleared_count = await clear_channel_subscribers(channel_id)
+    logging.info(f"Очищено {cleared_count} подписчиков при удалении канала {channel_id}")
 
     success = await remove_channel(channel_id)
 
@@ -550,6 +575,360 @@ async def catch_channel_link_message(message: Message, state: FSMContext):
     await message.answer(result_message, reply_markup=get_back_to_menu_keyboard())
     if success:
         await state.set_state(ChannelManagementStates.MAIN_CHANNEL_MENU)
+
+
+# ==================== ПАРСИНГ ПОДПИСЧИКОВ КАНАЛА ====================
+
+@router.callback_query(F.data == "start_parsing", StateFilter(ChannelManagementStates.CONFIRM_ADD_CHANNEL))
+async def callback_start_parsing(callback: CallbackQuery, state: FSMContext):
+    """Запуск парсинга подписчиков после добавления канала"""
+    data = await state.get_data()
+    channel_id = data.get("channel_id")
+
+    if not channel_id:
+        await callback.message.edit_text(
+            MESSAGES["error_occurred"],
+            reply_markup=get_back_to_menu_keyboard()
+        )
+        await callback.answer()
+        return
+
+    # Получаем канал из БД
+    channel = await get_channel(channel_id)
+    if not channel:
+        await callback.message.edit_text(
+            MESSAGES["error_occurred"],
+            reply_markup=get_back_to_menu_keyboard()
+        )
+        await callback.answer()
+        return
+
+    # Переходим в состояние парсинга
+    await state.set_state(ChannelParsingStates.PARSING_CHANNEL)
+    await state.update_data(
+        channel_id=channel_id,
+        channel_name=channel.channel_name,
+        start_time=datetime.now().isoformat()
+    )
+
+    # Запускаем парсинг
+    await callback.message.edit_text(
+        MESSAGES["parsing_started"].format(
+            channel=channel.channel_name,
+            subscriber_count="..."
+        ),
+        reply_markup=get_parsing_progress_keyboard()
+    )
+
+    # Запускаем асинхронную задачу парсинга
+    pyro_client = get_pyrogram_client()
+    asyncio.create_task(_run_parsing(callback.message, state, pyro_client))
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "skip_parsing", StateFilter(ChannelManagementStates.CONFIRM_ADD_CHANNEL))
+async def callback_skip_parsing(callback: CallbackQuery, state: FSMContext):
+    """Пропуск парсинга подписчиков"""
+    data = await state.get_data()
+    channel_name = data.get("channel_name", "Канал")
+
+    await state.clear()
+    await callback.message.edit_text(
+        MESSAGES["parsing_not_started"].format(channel=channel_name),
+        reply_markup=get_back_to_menu_keyboard()
+    )
+    await callback.answer()
+
+
+async def _run_parsing(message: Message, state: FSMContext, pyro_client: PyrogramClient):
+    """Фоновый процесс парсинга подписчиков"""
+    try:
+        data = await state.get_data()
+        channel_id = data.get("channel_id")
+        channel_name = data.get("channel_name")
+        app = await pyro_client.start()
+
+        # Проверяем права администратора
+        has_rights = await check_pyrogram_client_admin_rights(app, channel_id)
+        if not has_rights:
+            await state.set_state(ChannelParsingStates.PARSING_CANCELLED)
+            await message.edit_text(
+                MESSAGES["parsing_error"].format(
+                    channel=channel_name,
+                    error="У Pyrogram клиента нет прав администратора в канале"
+                ),
+                reply_markup=get_parsing_result_keyboard(channel_id)
+            )
+            return
+
+        # Выполняем парсинг
+        subscribers, with_username_count, bots_count = await parse_channel_subscribers(
+            client=app,
+            channel_id=channel_id
+        )
+
+        if not subscribers:
+            await state.set_state(ChannelParsingStates.PARSING_COMPLETE)
+            await message.edit_text(
+                MESSAGES["parsing_no_subscribers"].format(channel=channel_name),
+                reply_markup=get_parsing_result_keyboard(channel_id)
+            )
+            return
+
+        # Сохраняем подписчиков в БД
+        added, updated = await bulk_add_channel_subscribers(channel_id, subscribers)
+
+        # Получаем статистику
+        stats = await get_channel_subscribers_stats(channel_id)
+
+        # Формируем сообщение с результатами
+        result_message = MESSAGES["parsing_complete"].format(
+            channel=channel_name,
+            total=stats["active"],
+            with_username=stats["with_username"],
+            without_username=stats["without_username"],
+            added=added,
+            updated=updated
+        )
+
+        await state.set_state(ChannelParsingStates.PARSING_COMPLETE)
+        await message.edit_text(
+            result_message,
+            reply_markup=get_parsing_result_keyboard(channel_id)
+        )
+
+        logging.info(f"Парсинг канала {channel_name} ({channel_id}) завершен: добавлено={added}, обновлено={updated}")
+
+    except Exception as e:
+        logging.error(f"Ошибка при парсинге канала: {e}")
+        data = await state.get_data()
+        channel_name = data.get("channel_name", "Канал")
+
+        await state.set_state(ChannelParsingStates.PARSING_CANCELLED)
+        await message.edit_text(
+            MESSAGES["parsing_error"].format(
+                channel=channel_name,
+                error=str(e)
+            ),
+            reply_markup=get_parsing_result_keyboard(data.get("channel_id"))
+        )
+
+
+@router.callback_query(F.data == "cancel_parsing", StateFilter(ChannelParsingStates.PARSING_CHANNEL))
+async def callback_cancel_parsing(callback: CallbackQuery, state: FSMContext):
+    """Запрос на отмену парсинга"""
+    await callback.message.edit_text(
+        MESSAGES["confirm_delete"].format(title="парсинг"),
+        reply_markup=get_cancel_parsing_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "confirm_cancel_parsing", StateFilter(ChannelParsingStates.PARSING_CHANNEL))
+async def callback_confirm_cancel_parsing(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение отмены парсинга"""
+    data = await state.get_data()
+    channel_id = data.get("channel_id")
+    channel_name = data.get("channel_name", "Канал")
+
+    await state.set_state(ChannelParsingStates.PARSING_CANCELLED)
+    await callback.message.edit_text(
+        MESSAGES["parsing_cancelled"].format(
+            channel=channel_name,
+            processed="0"
+        ),
+        reply_markup=get_parsing_result_keyboard(channel_id)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "continue_parsing", StateFilter(ChannelParsingStates.PARSING_CHANNEL))
+async def callback_continue_parsing(callback: CallbackQuery, state: FSMContext):
+    """Продолжение парсинга после отмены"""
+    data = await state.get_data()
+    channel_name = data.get("channel_name", "Канал")
+
+    await callback.message.edit_text(
+        MESSAGES["parsing_in_progress"].format(
+            channel=channel_name,
+            processed="...",
+            total="...",
+            percent="0"
+        ),
+        reply_markup=get_parsing_progress_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("view_parsing_stats_"))
+async def callback_view_parsing_stats(callback: CallbackQuery, state: FSMContext):
+    """Просмотр статистики парсинга канала"""
+    channel_id = int(callback.data.split("_")[-1])
+
+    # Получаем канал
+    channel = await get_channel(channel_id)
+    if not channel:
+        await callback.answer("Канал не найден", show_alert=True)
+        return
+
+    # Получаем статистику
+    stats = await get_channel_subscribers_stats(channel_id)
+
+    stats_text = MESSAGES["parsing_admin_notification"].format(
+        channel=channel.channel_name,
+        total=stats["total"],
+        with_username=stats["with_username"],
+        without_username=stats["without_username"],
+        new=stats["active"],
+        updated=0
+    )
+
+    await state.set_state(ChannelParsingStates.VIEWING_PARSING_STATS)
+    await callback.message.edit_text(
+        stats_text,
+        reply_markup=get_channel_parsing_actions_keyboard(channel_id)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("reparse_channel_"))
+async def callback_reparse_channel(callback: CallbackQuery, state: FSMContext):
+    """Перепарсинг канала"""
+    channel_id = int(callback.data.split("_")[-1])
+
+    # Получаем канал
+    channel = await get_channel(channel_id)
+    if not channel:
+        await callback.answer("Канал не найден", show_alert=True)
+        return
+
+    # Переходим в состояние парсинга
+    await state.set_state(ChannelParsingStates.PARSING_CHANNEL)
+    await state.update_data(
+        channel_id=channel_id,
+        channel_name=channel.channel_name,
+        start_time=datetime.now().isoformat()
+    )
+
+    # Показываем сообщение о начале парсинга
+    await callback.message.edit_text(
+        MESSAGES["parsing_started"].format(
+            channel=channel.channel_name,
+            subscriber_count="..."
+        ),
+        reply_markup=get_parsing_progress_keyboard()
+    )
+
+    # Запускаем парсинг
+    pyro_client = get_pyrogram_client()
+    asyncio.create_task(_run_parsing(callback.message, state, pyro_client))
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("start_parsing_"))
+async def callback_start_parsing_from_menu(callback: CallbackQuery, state: FSMContext):
+    """Запуск парсинга из меню действий с каналом"""
+    channel_id = int(callback.data.split("_")[-1])
+
+    # Получаем канал
+    channel = await get_channel(channel_id)
+    if not channel:
+        await callback.answer("Канал не найден", show_alert=True)
+        return
+
+    # Переходим в состояние парсинга
+    await state.set_state(ChannelParsingStates.PARSING_CHANNEL)
+    await state.update_data(
+        channel_id=channel_id,
+        channel_name=channel.channel_name,
+        start_time=datetime.now().isoformat()
+    )
+
+    # Показываем сообщение о начале парсинга
+    await callback.message.edit_text(
+        MESSAGES["parsing_started"].format(
+            channel=channel.channel_name,
+            subscriber_count="..."
+        ),
+        reply_markup=get_parsing_progress_keyboard()
+    )
+
+    # Запускаем парсинг
+    pyro_client = get_pyrogram_client()
+    asyncio.create_task(_run_parsing(callback.message, state, pyro_client))
+
+    await callback.answer()
+
+
+# Команда для ручного запуска парсинга всех каналов
+@router.message(Command(commands=["parse_all_channels"]))
+async def command_parse_all_channels(message: Message, state: FSMContext, pyro: PyrogramClient):
+    """Команда для ручного парсинга всех каналов (только для главного админа)"""
+    from config import config
+
+    if message.from_user.id != config.MAIN_ADMIN_ID:
+        await message.answer(MESSAGES["access_denied"])
+        return
+
+    channels = await get_all_channels()
+    if not channels:
+        await message.answer("Нет добавленных каналов для парсинга.")
+        return
+
+    await message.answer(f"🔄 Начинаю парсинг {len(channels)} каналов...")
+
+    results = []
+    for channel in channels:
+        try:
+            # Проверяем права
+            has_rights = await check_pyrogram_client_admin_rights(pyro, channel.channel_id)
+            if not has_rights:
+                results.append(f"❌ {channel.channel_name}: нет прав администратора")
+                continue
+
+            # Парсим
+            subscribers, with_username_count, bots_count = await parse_channel_subscribers(
+                client=app,
+                channel_id=channel.channel_id
+            )
+
+            if subscribers:
+                added, updated = await bulk_add_channel_subscribers(channel.channel_id, subscribers)
+                results.append(f"✅ {channel.channel_name}: добавлено={added}, обновлено={updated}")
+            else:
+                results.append(f"⚠️ {channel.channel_name}: нет подписчиков с username")
+
+        except Exception as e:
+            results.append(f"❌ {channel.channel_name}: ошибка - {str(e)[:50]}")
+
+    # Отправляем отчет
+    report = "📊 <b>Результаты парсинга всех каналов:</b>\n\n" + "\n".join(results)
+    await message.answer(report, parse_mode="HTML")
+
+
+# Команда для просмотра статистики парсинга
+@router.message(Command(commands=["parsing_stats"]))
+async def command_parsing_stats(message: Message):
+    """Команда для просмотра статистики парсинга"""
+    channels = await get_all_channels()
+    if not channels:
+        await message.answer("Нет добавленных каналов.")
+        return
+
+    stats_lines = []
+    for channel in channels:
+        stats = await get_channel_subscribers_stats(channel.channel_id)
+        channel_name = f"@{channel.channel_username}" if channel.channel_username else channel.channel_name
+        stats_lines.append(
+            f"📺 <b>{channel_name}</b>\n"
+            f"   👥 Всего: {stats['total']} | Активных: {stats['active']}\n"
+            f"   📝 С username: {stats['with_username']} | Без: {stats['without_username']}"
+        )
+
+    stats_text = "📊 <b>Статистика подписчиков каналов:</b>\n\n" + "\n\n".join(stats_lines)
+    await message.answer(stats_text, parse_mode="HTML")
 
 
 def setup_admin_handlers(dp: Dispatcher):

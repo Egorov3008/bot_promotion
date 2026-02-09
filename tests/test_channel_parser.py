@@ -11,12 +11,17 @@ from database.database import bulk_add_channel_subscribers, clear_channel_subscr
 @pytest.fixture
 def mock_pyrogram_client():
     """Фикстура для мока Pyrogram клиента"""
-    mock_app = AsyncMock()
+    mock_app = MagicMock()
     mock_app.invoke = AsyncMock()
-    mock_app.get_chat_members = AsyncMock()
-    mock_app.get_chat_member = AsyncMock()
     mock_app.start = AsyncMock()
     mock_app.stop = AsyncMock()
+
+    # get_chat_members должен возвращать async итератор (не AsyncMock)
+    async def mock_get_chat_members(*args, **kwargs):
+        return AsyncIteratorFromList([])
+    mock_app.get_chat_members = mock_get_chat_members
+
+    mock_app.get_chat_member = AsyncMock()
     return mock_app
 
 
@@ -105,7 +110,7 @@ def mock_chat_member_member(sample_pyrogram_user):
 @pytest.mark.asyncio
 async def test_check_pyrogram_client_admin_rights_creator(mock_pyrogram_client, mock_chat_member_creator):
     """Тест проверки прав администратора для создателя канала."""
-    mock_pyrogram_client.get_chat_member.return_value = mock_chat_member_creator
+    mock_pyrogram_client.get_chat_member = AsyncMock(return_value=mock_chat_member_creator)
     channel_id = -1001234567890
     client_user_id = 123456789
     result = await check_pyrogram_client_admin_rights(mock_pyrogram_client, channel_id, client_user_id)
@@ -115,7 +120,7 @@ async def test_check_pyrogram_client_admin_rights_creator(mock_pyrogram_client, 
 @pytest.mark.asyncio
 async def test_check_pyrogram_client_admin_rights_admin(mock_pyrogram_client, mock_chat_member_admin):
     """Тест проверки прав администратора для админа канала."""
-    mock_pyrogram_client.get_chat_member.return_value = mock_chat_member_admin
+    mock_pyrogram_client.get_chat_member = AsyncMock(return_value=mock_chat_member_admin)
     channel_id = -1001234567890
     client_user_id = 123456789
     result = await check_pyrogram_client_admin_rights(mock_pyrogram_client, channel_id, client_user_id)
@@ -125,7 +130,7 @@ async def test_check_pyrogram_client_admin_rights_admin(mock_pyrogram_client, mo
 @pytest.mark.asyncio
 async def test_check_pyrogram_client_admin_rights_member(mock_pyrogram_client, mock_chat_member_member):
     """Тест проверки прав администратора для обычного пользователя канала."""
-    mock_pyrogram_client.get_chat_member.return_value = mock_chat_member_member
+    mock_pyrogram_client.get_chat_member = AsyncMock(return_value=mock_chat_member_member)
     channel_id = -1001234567890
     client_user_id = 123456789
     result = await check_pyrogram_client_admin_rights(mock_pyrogram_client, channel_id, client_user_id)
@@ -135,7 +140,7 @@ async def test_check_pyrogram_client_admin_rights_member(mock_pyrogram_client, m
 @pytest.mark.asyncio
 async def test_check_pyrogram_client_admin_rights_not_participant(mock_pyrogram_client):
     """Тест проверки прав администратора, когда клиент не является участником канала."""
-    mock_pyrogram_client.get_chat_member.side_effect = UserNotParticipant("Not a participant")
+    mock_pyrogram_client.get_chat_member = AsyncMock(side_effect=UserNotParticipant("Not a participant"))
     channel_id = -1001234567890
     client_user_id = 123456789
     result = await check_pyrogram_client_admin_rights(mock_pyrogram_client, channel_id, client_user_id)
@@ -145,11 +150,62 @@ async def test_check_pyrogram_client_admin_rights_not_participant(mock_pyrogram_
 @pytest.mark.asyncio
 async def test_check_pyrogram_client_admin_rights_rpc_error(mock_pyrogram_client):
     """Тест проверки прав администратора при RPC ошибке."""
-    mock_pyrogram_client.get_chat_member.side_effect = RPCError("RPC Error")
+    mock_pyrogram_client.get_chat_member = AsyncMock(side_effect=RPCError("RPC Error"))
     channel_id = -1001234567890
     client_user_id = 123456789
     result = await check_pyrogram_client_admin_rights(mock_pyrogram_client, channel_id, client_user_id)
     assert result is False
+
+
+# Helper для создания async генератора из списка
+class AsyncIteratorFromList:
+    """Класс для создания async итератора из списка (совместим с async for)."""
+    def __init__(self, items):
+        self.items = items
+        self.index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.index >= len(self.items):
+            raise StopAsyncIteration
+        item = self.items[self.index]
+        self.index += 1
+        return item
+
+
+class MockPyrogramClient:
+    """Простой mock-класс для Pyrogram клиента."""
+    def __init__(self):
+        self.invoke = AsyncMock()
+        self.start = AsyncMock()
+        self.stop = AsyncMock()
+        self._get_chat_members_data = {}
+
+    async def get_chat_members(self, chat_id, *args, **kwargs):
+        """Возвращает async итератор на основе сохраненных данных."""
+        key = str(chat_id)
+        items = self._get_chat_members_data.get(key, [])
+        return AsyncIteratorFromList(items)
+
+    def set_chat_members_data(self, channel_id, members):
+        """Устанавливает данные для мока get_chat_members."""
+        self._get_chat_members_data[str(channel_id)] = members
+
+    def set_get_chat_members_side_effect(self, func):
+        """Переопределяет поведение get_chat_members."""
+        self.get_chat_members = func
+
+    async def get_chat_member(self, chat_id, user_id):
+        """Mock для get_chat_member."""
+        return AsyncMock()()
+
+
+@pytest.fixture
+def mock_pyrogram_client():
+    """Фикстура для мока Pyrogram клиента"""
+    return MockPyrogramClient()
 
 
 # --- Тесты для parse_channel_subscribers ---
@@ -165,11 +221,12 @@ async def test_parse_channel_subscribers_success(mock_pyrogram_client, sample_py
     mock_chat_member_2 = MagicMock(user=user_without_username)
     mock_chat_member_3 = MagicMock(user=bot_user)
 
-    mock_pyrogram_client.get_chat_members.return_value = [
+    # Устанавливаем данные для мока
+    mock_pyrogram_client.set_chat_members_data(-1001234567890, [
         mock_chat_member_1,
         mock_chat_member_2,
         mock_chat_member_3,
-    ]
+    ])
 
     channel_id = -1001234567890
     subscribers, total_members, has_username_count = await parse_channel_subscribers(mock_pyrogram_client, channel_id)
@@ -192,7 +249,7 @@ async def test_parse_channel_subscribers_large_channel(mock_pyrogram_client, sam
         user = MagicMock(id=10000 + i, username=f"user{i}", first_name=f"User{i}", last_name=f"Last{i}", is_bot=False)
         users_data.append(MagicMock(user=user))
 
-    mock_pyrogram_client.get_chat_members.return_value = users_data
+    mock_pyrogram_client.set_chat_members_data(-1001234567890, users_data)
 
     # Мокаем sleep для ускорения тестов
     mock_sleep = AsyncMock()
@@ -214,12 +271,30 @@ async def test_parse_channel_subscribers_flood_wait(mock_pyrogram_client, sample
     user1 = MagicMock(user=sample_pyrogram_user)
     user2 = MagicMock(user=MagicMock(id=12346, username="user2", first_name="User", last_name="Two", is_bot=False))
 
-    # Имитируем FloodWait после первого запроса
-    mock_pyrogram_client.get_chat_members.side_effect = [
-        [user1], 
-        FloodWait(value=1), 
-        [user2] 
-    ]
+    # Создаем итератор, который вызывает FloodWait после первого элемента
+    class FloodWaitIterator:
+        def __init__(self, items, exception_after=1):
+            self.items = items
+            self.exception_after = exception_after
+            self.index = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.index >= len(self.items):
+                raise StopAsyncIteration
+            if self.index >= self.exception_after:
+                raise FloodWait(value=1)
+            item = self.items[self.index]
+            self.index += 1
+            return item
+
+    # Переопределяем get_chat_members для этого теста
+    async def mock_get_chat_fw(chat_id, *args, **kwargs):
+        return FloodWaitIterator([user1, user2], exception_after=1)
+
+    mock_pyrogram_client.set_get_chat_members_side_effect(mock_get_chat_fw)
 
     mock_sleep = AsyncMock()
     monkeypatch.setattr("asyncio.sleep", mock_sleep)
@@ -237,7 +312,9 @@ async def test_parse_channel_subscribers_flood_wait(mock_pyrogram_client, sample
 @pytest.mark.asyncio
 async def test_parse_channel_subscribers_rpc_error(mock_pyrogram_client):
     """Тест обработки RPCError при парсинге."""
-    mock_pyrogram_client.get_chat_members.side_effect = RPCError("Test RPC Error")
+    async def raise_rpc_error(*args, **kwargs):
+        raise RPCError("Test RPC Error")
+    mock_pyrogram_client.set_get_chat_members_side_effect(raise_rpc_error)
 
     channel_id = -1001234567890
     subscribers, total_members, has_username_count = await parse_channel_subscribers(mock_pyrogram_client, channel_id)
@@ -250,7 +327,9 @@ async def test_parse_channel_subscribers_rpc_error(mock_pyrogram_client):
 @pytest.mark.asyncio
 async def test_parse_channel_subscribers_no_permissions(mock_pyrogram_client):
     """Тест обработки отсутствия прав при парсинге."""
-    mock_pyrogram_client.get_chat_members.side_effect = ChatAdminRequired("Admin rights needed")
+    async def raise_no_permissions(*args, **kwargs):
+        raise ChatAdminRequired("Admin rights needed")
+    mock_pyrogram_client.set_get_chat_members_side_effect(raise_no_permissions)
 
     channel_id = -1001234567890
     subscribers, total_members, has_username_count = await parse_channel_subscribers(mock_pyrogram_client, channel_id)

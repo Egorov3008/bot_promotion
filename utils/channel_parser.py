@@ -6,7 +6,6 @@ from pyrogram import Client
 from pyrogram.errors import FloodWait, BadRequest
 from pyrogram.enums import ChatMemberStatus
 
-logger = logging.getLogger(__name__)
 
 async def parse_channel_subscribers(
     client: Client,
@@ -51,7 +50,7 @@ async def parse_channel_subscribers(
                 await asyncio.sleep(0.1) 
 
     except FloodWait as e:
-        logger.warning(f"Получен FloodWait при парсинге канала {channel_id}: ждем {e.value} секунд. Обработано {total_processed} пользователей.")
+        logging.warning(f"Получен FloodWait при парсинге канала {channel_id}: ждем {e.value} секунд. Обработано {total_processed} пользователей.")
         await asyncio.sleep(e.value + 1) # Добавляем 1 секунду на всякий случай
         # В реальных условиях нужно будет повторить запрос с места обрыва,
         # что потребует изменений в логике генератора или создания внешнего счетчика.
@@ -62,19 +61,19 @@ async def parse_channel_subscribers(
 
     except BadRequest as e:
         if "CHAT_ADMIN_REQUIRED" in str(e):
-            logger.error(f"Ошибка при парсинге канала {channel_id}: У Pyrogram клиента нет прав администратора в канале. {e}")
+            logging.error(f"Ошибка при парсинге канала {channel_id}: У Pyrogram клиента нет прав администратора в канале. {e}")
             raise ValueError(f"BOT_NOT_ADMIN: У Pyrogram клиента нет прав администратора в канале {channel_id}.")
         elif "USER_RESTRICTED" in str(e) or "PEER_ID_INVALID" in str(e):
-             logger.warning(f"Ошибка при парсинге канала {channel_id}: Пользователь ограничен или ID недействителен. Возможна блокировка от канала, или это системный пользователь. {e}")
+             logging.warning(f"Ошибка при парсинге канала {channel_id}: Пользователь ограничен или ID недействителен. Возможна блокировка от канала, или это системный пользователь. {e}")
         else:
-            logger.error(f"Неизвестная ошибка BadRequest при парсинге канала {channel_id}: {e}")
+            logging.error(f"Неизвестная ошибка BadRequest при парсинге канала {channel_id}: {e}")
             raise
 
     except Exception as e:
-        logger.error(f"Непредвиденная ошибка при парсинге канала {channel_id}: {e}")
+        logging.error(f"Непредвиденная ошибка при парсинге канала {channel_id}: {e}")
         raise
     
-    logger.info(f"Парсинг канала {channel_id} завершен. Всего обработано: {total_processed}, "
+    logging.info(f"Парсинг канала {channel_id} завершен. Всего обработано: {total_processed}, "
                 f"пользователей с username: {users_with_username_count}, ботов: {bots_count}.")
     
     return subscribers_with_username, users_with_username_count, bots_count
@@ -86,44 +85,51 @@ async def get_pyrogram_client(client: Client) -> Client:
     if not client.is_connected:
         try:
             await client.start()
-            logger.info("Pyrogram клиент успешно запущен.")
+            logging.info("Pyrogram клиент успешно запущен.")
         except Exception as e:
-            logger.error(f"Ошибка запуска Pyrogram клиента: {e}")
+            logging.error(f"Ошибка запуска Pyrogram клиента: {e}")
             raise
     return client
 
-async def check_pyrogram_client_admin_rights(client: Client, channel_id: int) -> bool:
+async def check_pyrogram_client_admin_rights(client: Client, channel_id: int, client_user_id: int = None) -> bool:
     """
     Проверяет, имеет ли Pyrogram клиент административные права в канале.
     Предполагается, что клиент уже запущен.
+
+    Args:
+        client: Pyrogram клиент
+        channel_id: ID канала
+        client_user_id: Опционально ID пользователя для проверки (если не передан, используется get_me())
     """
     try:
-        me = await client.get_me()
-        if not me:
-            logger.error("Не удалось получить информацию о текущем Pyrogram клиенте.")
-            return False
+        if client_user_id is None:
+            me = await client.get_me()
+            if not me:
+                logging.error("Не удалось получить информацию о текущем Pyrogram клиенте.")
+                return False
+            client_user_id = me.id
 
         # Пытаемся получить информацию о клиенте как члене чата
-        member = await client.get_chat_member(chat_id=channel_id, user_id=me.id)
-        
+        member = await client.get_chat_member(chat_id=channel_id, user_id=client_user_id)
+
         # Проверяем статус члена чата
         if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
             return True
         else:
-            logger.warning(f"Pyrogram клиент {me.id} не имеет прав администратора в канале {channel_id}. Статус: {member.status.name}")
+            logging.warning(f"Pyrogram клиент {me.id} не имеет прав администратора в канале {channel_id}. Статус: {member.status.name}")
             return False
             
     except BadRequest as e:
         if "CHAT_ID_INVALID" in str(e) or "CHAT_NOT_FOUND" in str(e):
-            logger.error(f"Ошибка проверки прав в канале {channel_id}: Канал не найден или ID недействителен.")
+            logging.error(f"Ошибка проверки прав в канале {channel_id}: Канал не найден или ID недействителен.")
             return False
         if "USER_NOT_PARTICIPANT" in str(e):
              # Если клиент не является участником, то не может быть админом.
              # Это может быть нормальной ситуацией, если бот только что был отправлен в канал.
-             logger.warning(f"Pyrogram клиент не является участником канала {channel_id}.")
+             logging.warning(f"Pyrogram клиент не является участником канала {channel_id}.")
              return False
-        logger.error(f"Неизвестная ошибка BadRequest при проверке прав Pyrogram клиента в канале {channel_id}: {e}")
+        logging.error(f"Неизвестная ошибка BadRequest при проверке прав Pyrogram клиента в канале {channel_id}: {e}")
         return False
     except Exception as e:
-        logger.error(f"Непредвиденная ошибка при проверке прав Pyrogram клиента в канале {channel_id}: {e}")
+        logging.error(f"Непредвиденная ошибка при проверке прав Pyrogram клиента в канале {channel_id}: {e}")
         return False

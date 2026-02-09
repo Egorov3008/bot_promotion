@@ -57,3 +57,11 @@ class ViewGiveawaysStates(StatesGroup):
     VIEWING_DETAILS = State()       # Просмотр деталей конкретного розыгрыша
 
 
+class ChannelParsingStates(StatesGroup):
+    """Состояния для парсинга подписчиков канала"""
+    PARSING_CHANNEL = State()           # Парсинг выполняется
+    PARSING_CANCELLED = State()         # Парсинг отменён
+    PARSING_COMPLETE = State()          # Парсинг завершён (просмотр результатов)
+    VIEWING_PARSING_STATS = State()     # Просмотр статистики парсинга
+
+

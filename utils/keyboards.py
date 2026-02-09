@@ -368,4 +368,80 @@ async def get_winers_keyboard(winer_data: List[Dict[str, Any]]) -> InlineKeyboar
     builder.row(InlineKeyboardButton(text=BUTTONS["back_to_menu"], callback_data="back_to_menu"))
     return builder.as_markup()
 
-# TODO: Добавть клавиатуру назад в get_winers_keyboard
+
+# ==================== КЛАВИАТУРЫ ДЛЯ ПАРСИНГА ПОДПИСЧИКОВ ====================
+
+def get_start_parsing_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для запуска парсинга подписчиков"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["start_parsing"], callback_data="start_parsing")
+    )
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["skip_parsing"], callback_data="skip_parsing")
+    )
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["back"], callback_data="channel_management")
+    )
+    return builder.as_markup()
+
+
+def get_parsing_progress_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура статуса парсинга с возможностью отмены"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["cancel_parsing"], callback_data="cancel_parsing")
+    )
+    return builder.as_markup()
+
+
+def get_parsing_result_keyboard(channel_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура с результатами парсинга"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text=BUTTONS["view_parsing_stats"],
+            callback_data=f"view_parsing_stats_{channel_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=BUTTONS["reparse_channel"],
+            callback_data=f"reparse_channel_{channel_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["back_to_menu"], callback_data="main_menu")
+    )
+    return builder.as_markup()
+
+
+def get_cancel_parsing_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения отмены парсинга"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["yes"], callback_data="confirm_cancel_parsing"),
+        InlineKeyboardButton(text=BUTTONS["no"], callback_data="continue_parsing")
+    )
+    return builder.as_markup()
+
+
+def get_channel_parsing_actions_keyboard(channel_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура действий с парсингом канала"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text=BUTTONS["start_parsing"],
+            callback_data=f"start_parsing_{channel_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=BUTTONS["view_parsing_stats"],
+            callback_data=f"view_parsing_stats_{channel_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(text=BUTTONS["back"], callback_data="view_channels")
+    )
+    return builder.as_markup()

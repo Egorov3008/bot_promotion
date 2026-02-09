@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, Message, Update
 from aiogram.fsm.context import FSMContext
 
 from handlers.admin_handlers import router, get_all_admins, add_admin, remove_admin, get_all_channels, add_channel, \
-    remove_channel, add_channel_by_username, get_active_giveaways, get_finished_giveaways, callback_admin_management, \
+    remove_channel, add_channel_by_username, callback_admin_management, \
     callback_view_admins, callback_add_admin, process_new_admin_id, confirm_add_admin, callback_remove_admin, \
     confirm_remove_admin, callback_channel_management, callback_view_channels, callback_add_channel, \
     process_channel_link, process_channel_info, confirm_add_channel, confirm_remove_channel, callback_view_giveaways, \
@@ -416,7 +416,7 @@ async def test_process_channel_info_not_channel():
 @pytest.mark.asyncio
 async def test_confirm_add_channel_success():
     """
-    Тест для проверки confirm_add_channel при успешном добавлении.
+    Тест для проверки confirm_add_channel при успешном добавлении с предложением парсинга.
     """
     callback = create_callback_query("confirm")
     state = create_state()
@@ -425,16 +425,18 @@ async def test_confirm_add_channel_success():
         "channel_name": "Test Channel",
         "channel_username": "test_channel"
     }
-    
+
     with patch("handlers.admin_handlers.add_channel", return_value=True):
-        with patch.dict("handlers.admin_handlers.MESSAGES", {"channel_added": "Added"}):
-            with patch("handlers.admin_handlers.get_back_to_menu_keyboard", return_value="keyboard"):
-                await confirm_add_channel(callback, state)
-                
-    callback.message.edit_text.assert_called_once_with(
-        "Added",
-        reply_markup="keyboard"
-    )
+        with patch.dict("handlers.admin_handlers.MESSAGES", {"channel_added_parsing_prompt": "Added {channel}"}
+                       ) as mock_messages:
+            mock_messages["channel_added_parsing_prompt"] = "Added {channel}"
+        with patch("handlers.admin_handlers.get_start_parsing_keyboard", return_value="keyboard"):
+            await confirm_add_channel(callback, state)
+
+    # Проверяем, что edit_text был вызван с сообщением о добавлении
+    call_args = callback.message.edit_text.call_args
+    assert call_args is not None
+    assert "Test Channel" in call_args[0][0] or "test_channel" in call_args[0][0]
     callback.answer.assert_called_once()
 
 
@@ -450,12 +452,12 @@ async def test_confirm_add_channel_failure():
         "channel_name": "Test Channel",
         "channel_username": "test_channel"
     }
-    
+
     with patch("handlers.admin_handlers.add_channel", return_value=False):
         with patch.dict("handlers.admin_handlers.MESSAGES", {"channel_already_exists": "Exists"}):
             with patch("handlers.admin_handlers.get_back_to_menu_keyboard", return_value="keyboard"):
                 await confirm_add_channel(callback, state)
-                
+
     callback.message.edit_text.assert_called_once_with(
         "Exists",
         reply_markup="keyboard"
@@ -466,17 +468,18 @@ async def test_confirm_add_channel_failure():
 @pytest.mark.asyncio
 async def test_confirm_remove_channel_success():
     """
-    Тест для проверки confirm_remove_channel при успешном удалении.
+    Тест для проверки confirm_remove_channel при успешном удалении с очисткой подписчиков.
     """
     callback = create_callback_query("confirm")
     state = create_state()
     state.get_data.return_value = {"remove_channel_id": 123}
-    
-    with patch("handlers.admin_handlers.remove_channel", return_value=True):
-        with patch.dict("handlers.admin_handlers.MESSAGES", {"channel_removed": "Removed"}):
-            with patch("handlers.admin_handlers.get_back_to_menu_keyboard", return_value="keyboard"):
-                await confirm_remove_channel(callback, state)
-                
+
+    with patch("handlers.admin_handlers.clear_channel_subscribers", return_value=5):
+        with patch("handlers.admin_handlers.remove_channel", return_value=True):
+            with patch.dict("handlers.admin_handlers.MESSAGES", {"channel_removed": "Removed"}):
+                with patch("handlers.admin_handlers.get_back_to_menu_keyboard", return_value="keyboard"):
+                    await confirm_remove_channel(callback, state)
+
     callback.message.edit_text.assert_called_once_with(
         "Removed",
         reply_markup="keyboard"
@@ -492,12 +495,13 @@ async def test_confirm_remove_channel_failure():
     callback = create_callback_query("confirm")
     state = create_state()
     state.get_data.return_value = {"remove_channel_id": 123}
-    
-    with patch("handlers.admin_handlers.remove_channel", return_value=False):
-        with patch.dict("handlers.admin_handlers.MESSAGES", {"error_occurred": "Error"}):
-            with patch("handlers.admin_handlers.get_back_to_menu_keyboard", return_value="keyboard"):
-                await confirm_remove_channel(callback, state)
-                
+
+    with patch("handlers.admin_handlers.clear_channel_subscribers", return_value=0):
+        with patch("handlers.admin_handlers.remove_channel", return_value=False):
+            with patch.dict("handlers.admin_handlers.MESSAGES", {"error_occurred": "Error"}):
+                with patch("handlers.admin_handlers.get_back_to_menu_keyboard", return_value="keyboard"):
+                    await confirm_remove_channel(callback, state)
+
     callback.message.edit_text.assert_called_once_with(
         "Error",
         reply_markup="keyboard"
