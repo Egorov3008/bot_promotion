@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import random
+from pyrogram.errors import UserBlocked, FloodWait, UserIsBlocked
 
 
 @dataclass
@@ -74,22 +75,20 @@ class MailingMode:
                 parse_mode=parse_mode,
                 disable_web_page_preview=disable_web_page_preview
             )
-            return True, "Успешно отправлено"
-            
+            return True, "SUCCESS"
+        except UserBlocked:
+            self.logger.warning(f"Пользователь {user_id} заблокировал бота.")
+            return False, "USER_BLOCKED"
+        except UserIsBlocked:
+            self.logger.warning(f"Сообщения для пользователя {user_id} заблокированы.")
+            return False, "USER_IS_BLOCKED"
+        except FloodWait as e:
+            self.logger.warning(f"Превышен лимит запросов для {user_id}. Пауза {e.value} секунд.")
+            return False, f"FLOOD_WAIT:{e.value}"
         except Exception as e:
-            error_msg = str(e).lower()
-            
-            if "blocked" in error_msg or "bot was blocked" in error_msg:
-                return False, "Пользователь заблокировал бота"
-            elif "flood" in error_msg or "too many requests" in error_msg:
-                return False, "Превышен лимит запросов (Flood Wait)"
-            elif "private" in error_msg or "need to accept the privacy policy" in error_msg:
-                return False, "Аккаунт приватный или требует принятия политики конфиденциальности"
-            elif "user is deactivated" in error_msg:
-                return False, "Пользователь деактивирован"
-            else:
-                return False, f"Неизвестная ошибка: {e}"
-    
+            self.logger.error(f"Неизвестная ошибка при отправке сообщения {user_id}: {e}")
+            return False, f"OTHER_ERROR:{e}"
+
     async def send_bulk_messages(
         self,
         user_ids: List[int],
@@ -101,17 +100,6 @@ class MailingMode:
     ) -> MailingStats:
         """
         Массовая рассылка сообщений пользователям.
-        
-        Args:
-            user_ids: Список ID пользователей
-            text: Текст сообщения для всех
-            parse_mode: Режим разметки
-            disable_web_page_preview: Отключить превью ссылок
-            randomize_order: Перемешивать ли порядок пользователей
-            progress_callback: Функция для обновления прогресса
-        
-        Returns:
-            MailingStats: Статистика рассылки
         """
         stats = MailingStats()
         stats.start_time = asyncio.get_event_loop().time()
@@ -141,12 +129,15 @@ class MailingMode:
                 stats.successful += 1
             else:
                 stats.failed += 1
-                if "blocked" in message.lower():
+                if message == "USER_BLOCKED" or message == "USER_IS_BLOCKED":
                     stats.blocked += 1
-                elif "flood" in message.lower():
+                elif message.startswith("FLOOD_WAIT"):
                     stats.throttled += 1
-                    # Дополнительная задержка при флуде
-                    await asyncio.sleep(30)
+                    try:
+                        wait_time = int(message.split(":")[1])
+                        await asyncio.sleep(wait_time)
+                    except (ValueError, IndexError):
+                        await asyncio.sleep(30) # Default to 30 seconds if parse fails
                 else:
                     stats.other_errors += 1
             
@@ -228,12 +219,15 @@ class MailingMode:
                 stats.successful += 1
             else:
                 stats.failed += 1
-                if "blocked" in message.lower():
+                if message == "USER_BLOCKED" or message == "USER_IS_BLOCKED":
                     stats.blocked += 1
-                elif "flood" in message.lower():
+                elif message.startswith("FLOOD_WAIT"):
                     stats.throttled += 1
-                    # Дополнительная задержка при флуде
-                    await asyncio.sleep(30)
+                    try:
+                        wait_time = int(message.split(":")[1])
+                        await asyncio.sleep(wait_time)
+                    except (ValueError, IndexError):
+                        await asyncio.sleep(30) # Default to 30 seconds if parse fails
                 else:
                     stats.other_errors += 1
             
