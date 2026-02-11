@@ -19,7 +19,7 @@ from states.admin_states import (
     AdminStates,
     CreateGiveawayStates,
     AdminDialogStates,
-    ChannelDialogStates,
+    ChannelDialogStates, ViewGiveawaysStates,
 )
 from texts.messages import MESSAGES, BUTTONS
 

@@ -55,9 +55,11 @@ class ViewGiveawaysStates(StatesGroup):
     CHOOSING_TYPE = State()         # Выбор типа (активные/завершенные)
     VIEWING_LIST = State()          # Просмотр списка
     VIEWING_DETAILS = State()       # Просмотр деталей конкретного розыгрыша
+    VIEWING_ACTIVE = State()     # Просмотр активных розыгрышей
+    VIEWING_FINISHED = State()  # Просмотр завершённых розыгрышей
 
 
-<<<<<<< Current (Your changes)
+
 class ChannelParsingStates(StatesGroup):
     """Состояния для парсинга подписчиков канала"""
     PARSING_CHANNEL = State()           # Парсинг выполняется
@@ -66,7 +68,6 @@ class ChannelParsingStates(StatesGroup):
     VIEWING_PARSING_STATS = State()     # Просмотр статистики парсинга
 
 
-=======
 class AdminDialogStates(StatesGroup):
     """Состояния диалога управления администраторами (aiogram-dialog)."""
     MAIN_MENU = State()
@@ -81,4 +82,4 @@ class ChannelDialogStates(StatesGroup):
     ADD_BY_FORWARD = State()
     CHOOSE_CHANNEL_TO_REMOVE = State()
 
->>>>>>> Incoming (Background Agent changes)
+
