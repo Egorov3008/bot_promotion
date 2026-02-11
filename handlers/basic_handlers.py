@@ -4,6 +4,8 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
+from aiogram_dialog import DialogManager, StartMode
+
 from config import config
 from texts.messages import MESSAGES
 from utils.keyboards import get_main_admin_keyboard, get_participate_keyboard
@@ -13,6 +15,8 @@ from database.database import (
 )
 from pyrogram_app.pyro_client import PyrogramClient
 from utils.scheduler import check_user_subscription
+
+from states.admin_states import AdminStates
 
 router = Router()
 
@@ -51,13 +55,10 @@ async def cmd_clear(message: Message):
 
 
 @router.message(Command("admin"))
-async def cmd_admin(message: Message, state: FSMContext):
+async def cmd_admin(message: Message, state: FSMContext, dialog_manager: DialogManager):
     """Обработчик команды /admin - вход в админ-панель"""
     await state.clear()
-    await message.answer(
-        MESSAGES["admin_main_menu"],
-        reply_markup=get_main_admin_keyboard()
-    )
+    await dialog_manager.start(state=AdminStates.MAIN_MENU, mode=StartMode.RESET_STACK)
 
 
 @router.callback_query(F.data == "main_menu")

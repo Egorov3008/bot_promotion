@@ -57,6 +57,7 @@ class ViewGiveawaysStates(StatesGroup):
     VIEWING_DETAILS = State()       # Просмотр деталей конкретного розыгрыша
 
 
+<<<<<<< Current (Your changes)
 class ChannelParsingStates(StatesGroup):
     """Состояния для парсинга подписчиков канала"""
     PARSING_CHANNEL = State()           # Парсинг выполняется
@@ -65,3 +66,19 @@ class ChannelParsingStates(StatesGroup):
     VIEWING_PARSING_STATS = State()     # Просмотр статистики парсинга
 
 
+=======
+class AdminDialogStates(StatesGroup):
+    """Состояния диалога управления администраторами (aiogram-dialog)."""
+    MAIN_MENU = State()
+    ADD_ADMIN_ID = State()
+    CHOOSE_ADMIN_TO_REMOVE = State()
+
+
+class ChannelDialogStates(StatesGroup):
+    """Состояния диалога управления каналами (aiogram-dialog)."""
+    MAIN_MENU = State()
+    ADD_BY_LINK = State()
+    ADD_BY_FORWARD = State()
+    CHOOSE_CHANNEL_TO_REMOVE = State()
+
+>>>>>>> Incoming (Background Agent changes)

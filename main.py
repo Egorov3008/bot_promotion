@@ -6,6 +6,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
+from aiogram_dialog import setup_dialogs
+
 from config import config
 from database.database import init_db
 from handlers import setup_handlers
@@ -13,6 +15,7 @@ from middlewares.auth import AdminMiddleware
 from middlewares.pyro import PyrogramMiddleware
 from pyrogram_app.pyro_client import setup_pyrogram
 from utils.scheduler import setup_scheduler
+from dialogs import register_dialogs
 
 
 async def main():
@@ -56,6 +59,10 @@ async def main():
     
     # Регистрация handlers
     setup_handlers(dp)
+
+    # Регистрация диалогов и инициализация aiogram-dialog
+    register_dialogs(dp)
+    setup_dialogs(dp)
     
     # Настройка планировщика для автоматического завершения розыгрышей
     await setup_scheduler(bot)
