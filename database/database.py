@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from config import config
 from database.models import Base, Admin, Channel, Giveaway, Participant, Winner, GiveawayStatus, ChannelSubscriber
+from database.cache import cached_with_ttl
 
 # Создаем асинхронный движок БД
 engine = create_async_engine(
@@ -145,7 +146,7 @@ async def add_channel(channel_id: int, channel_name: str,
     """Добавление канала"""
     async with async_session() as session:
         try:
-            channel = Channel(
+            channel = Channel( 
                 channel_id=channel_id,
                 channel_name=channel_name,
                 channel_username=channel_username,
@@ -208,6 +209,7 @@ async def add_channel_by_username(channel_username: str, bot, added_by: int = No
         return False, f"❌ Ошибка при добавлении канала: {str(e)}"
 
 
+@cached_with_ttl(ttl=300)
 async def get_all_channels() -> List[Channel]:
     """Получение списка всех каналов"""
     async with async_session() as session:
@@ -255,6 +257,7 @@ async def create_giveaway(title: str, description: str, message_winner: str, end
         return giveaway
 
 
+@cached_with_ttl(ttl=300)
 async def get_giveaway(giveaway_id: int) -> Optional[Giveaway]:
     """Получение розыгрыша по ID"""
     async with async_session() as session:
@@ -266,6 +269,7 @@ async def get_giveaway(giveaway_id: int) -> Optional[Giveaway]:
         return result.scalar_one_or_none()
 
 
+@cached_with_ttl(ttl=60)
 async def get_active_giveaways() -> List[Giveaway]:
     """Получение активных розыгрышей"""
     async with async_session() as session:
@@ -462,6 +466,7 @@ async def add_participant(giveaway_id: int, user_id: int,
             return False
 
 
+@cached_with_ttl(ttl=20)
 async def get_participants_count(giveaway_id: int) -> int:
     """Получение количества участников розыгрыша"""
     async with async_session() as session:
@@ -481,6 +486,7 @@ async def get_participants(giveaway_id: int) -> List[Participant]:
 
 
 # Функции для работы с победителями
+@cached_with_ttl(ttl=600)
 async def get_winners(giveaway_id: int) -> List[Winner]:
     """Получение списка победителей розыгрыша"""
     async with async_session() as session:
@@ -689,6 +695,7 @@ async def was_user_subscriber(channel_id: int, user_id: int, at_time: datetime) 
         return subscriber.left_at > at_time
 
 
+@cached_with_ttl(ttl=600)
 async def get_channel(channel_id: int) -> Optional[Channel]:
     async with async_session() as session:
         result = await session.execute(
@@ -783,6 +790,7 @@ async def bulk_add_channel_subscribers(channel_id: int, subscribers: List[Dict])
     return added_count, updated_count
 
 
+@cached_with_ttl(ttl=300)
 async def get_channel_subscribers_stats(channel_id: int) -> Dict[str, int]:
     """
     Получение статистики по подписчикам канала.

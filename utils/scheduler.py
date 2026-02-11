@@ -12,6 +12,7 @@ from database.database import (
     get_participants_count, get_channel, get_giveaway, get_active_giveaways
 )
 from database.models import Channel
+from pyrogram_app import MailingMode
 from pyrogram_app.pyro_client import get_pyrogram_client
 from texts.messages import REMINDER_POST_TEMPLATE, MESSAGES
 from utils.datetime_utils import format_datetime
@@ -240,21 +241,31 @@ async def finish_giveaway_task(bot, giveaway_id: int) -> None:
         channel: Optional[Channel] = await get_channel(giveaway.channel_id)
         winners_data = []
         winners_list = []
-        pyrogram_client = get_pyrogram_client()  # Получаем уже запущенный экземпляр
+
+        # 🔹 Получаем запущенный экземпляр PyrogramClient
+        pyro_client_wrapper = get_pyrogram_client()
+        if not pyro_client_wrapper.is_running:
+            logging.error("Pyrogram клиент не запущен! Невозможно отправить сообщения победителям.")
+            return
+
+        # 🔹 Экспортируем внутренний Client и используем MailingMode
+        client = pyro_client_wrapper.export()
+        mailer = MailingMode(client, delay_range=(1.5, 3.0))  # Задержка между сообщениями
 
         for i, w in enumerate(winners, 1):
             name = f"@{w.username}" if w.username else (w.first_name or w.full_name)
             emoji = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}")
             winners_list.append(f"{emoji} <b>{i} место:</b> {name}")
-            if pyrogram_client.is_running:
 
-                if not giveaway.message_winner:
-                    giveaway.message_winner = ("Поздравляем! Вы выиграли розыгрыш!\n"
-                                               "Скоро с вами свяжется администратор.")
-                sender_check = await pyrogram_client.send_message(w.user_id, giveaway.message_winner)
-            else:
-                sender_check = False
-                logging.warning("Pyrogram клиент не запущен")
+            # 📨 Отправляем персональное сообщение через MailingMode
+            success, delivery_message = await mailer.send_message_to_user(
+                user_id=w.user_id,
+                text=giveaway.message_winner or (
+                    "Поздравляем! Вы выиграли розыгрыш!\n"
+                    "Скоро с вами свяжется администратор."
+                ),
+                parse_mode="HTML",
+            )
 
             winners_data.append({
                 "user_id": w.user_id,
@@ -262,17 +273,20 @@ async def finish_giveaway_task(bot, giveaway_id: int) -> None:
                 "first_name": w.first_name,
                 "full_name": w.full_name,
                 "place": i,
-                "sender_check": sender_check
+                "sender_check": success,
+                "delivery_message": delivery_message
             })
 
+            if not success:
+                logging.warning(f"Не удалось отправить сообщение победителю {w.user_id}: {delivery_message}")
 
+        # 🔚 Завершаем розыгрыш
         await finish_giveaway(giveaway_id=giveaway_id, winners_data=winners_data)
         await _send_winner_announcement(bot, giveaway, winners_list)
         await _send_admin_results(bot, channel, winners_list, winners_data)
 
     except Exception as e:
-        logging.error(f"Ошибка при завершении розыгрыша #{giveaway_id}: {e}")
-
+        logging.error(f"Ошибка при завершении розыгрыша #{giveaway_id}: {e}", exc_info=True)
 
 async def _send_no_participants_message(bot, giveaway) -> None:
     """Отправляет сообщение о завершении без участников."""

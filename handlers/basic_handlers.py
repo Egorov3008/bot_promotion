@@ -17,21 +17,6 @@ from utils.scheduler import check_user_subscription
 router = Router()
 
 
-# Удалён универсальный логгер сообщений, чтобы не блокировать другие хендлеры
-
-@router.message(lambda m: m.text == "/test_send")
-async def send_message_pyrogram(message: Message, pyro: PyrogramClient):
-    if message.from_user.id != config.MAIN_ADMIN_ID:
-        return
-
-    success = await pyro.send_message(
-        7563318767,
-        "Тестовое сообщение от Pyrogram! 🚀"
-    )
-    status = "✅ Успешно" if success else "❌ Ошибка"
-    await message.answer(f"Отправка: {status}")
-
-
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     """Обработчик команды /start"""

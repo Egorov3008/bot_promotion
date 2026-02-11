@@ -100,7 +100,7 @@ ENV/
 __pycache__/
 .venv/
 env/
-database/
+
 
 # Project-specific
 # Database files
