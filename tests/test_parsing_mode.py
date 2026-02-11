@@ -19,21 +19,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
 from pyrogram.errors import FloodWait, BadRequest, UserNotParticipant, RPCError
 from pyrogram.enums import ChatMemberStatus
+from pyrogram.raw.types import stats
 
 from pyrogram_app.parsing_mode import ParsingMode, ParsingStats, SubscriberInfo
-# from utils.channel_parser import parse_channel_subscribers, check_pyrogram_client_admin_rights # These are now mocked via conftest
+from tests.conftest import AsyncIteratorFromList
 
-# NOTE: mock_external_parsing_funcs is now handled by conftest.py
-# @pytest.fixture(autouse=True)
-# def mock_external_parsing_funcs(monkeypatch):
-#     ...
-    monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
-# Move parsing_mode fixture outside the class
 @pytest.fixture
 def parsing_mode(mock_pyrogram_client):
     return ParsingMode(mock_pyrogram_client)
-        return ParsingMode(mock_pyrogram_client)
 
 class TestParsingMode:
     """Тесты для класса ParsingMode"""
