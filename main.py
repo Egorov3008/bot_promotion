@@ -6,6 +6,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
+from aiogram_dialog import setup_dialogs
+
 from config import config
 from database.database import init_db
 from handlers import setup_handlers
@@ -13,13 +15,14 @@ from middlewares.auth import AdminMiddleware
 from middlewares.pyro import PyrogramMiddleware
 from pyrogram_app.pyro_client import setup_pyrogram
 from utils.scheduler import setup_scheduler
+from dialogs import register_dialogs
 
 
 async def main():
     """Основная функция запуска бота"""
     # Настройка логирования
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler('bot.log', encoding='utf-8'),
@@ -34,6 +37,7 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+    logging.getLogger("pyrogram.session").setLevel(logging.ERROR)
 
     # Устанавливаем команды бота
     try:
@@ -56,6 +60,10 @@ async def main():
     
     # Регистрация handlers
     setup_handlers(dp)
+
+    # Регистрация диалогов и инициализация aiogram-dialog
+    register_dialogs(dp)
+    setup_dialogs(dp)
     
     # Настройка планировщика для автоматического завершения розыгрышей
     await setup_scheduler(bot)

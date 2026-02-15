@@ -80,9 +80,14 @@ target/
 celerybeat-schedule
 
 # dotenv
+.claude
+.mcp.json
+.mcp.json.bak
 .env
+.mcp.json
 *.session
 *.session-journal
+*.json
 # virtualenv
 venv/
 ENV/
@@ -100,7 +105,7 @@ ENV/
 __pycache__/
 .venv/
 env/
-database/
+
 
 # Project-specific
 # Database files
@@ -119,3 +124,5 @@ database/
 .Trashes
 ehthumbs.db
 Thumbs.db
+CLAUDE.md
+KODA.md

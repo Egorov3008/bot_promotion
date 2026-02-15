@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple
 
 from sqlalchemy import select, delete, update, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import selectinload
 
 from config import config
-from database.models import Base, Admin, Channel, Giveaway, Participant, Winner, GiveawayStatus, ChannelSubscriber
+from database.models import Base, Admin, Channel, Giveaway, Participant, Winner, GiveawayStatus, ChannelSubscriber, Mailing
+
 
 # Создаем асинхронный движок БД
 engine = create_async_engine(
@@ -35,7 +36,7 @@ async def init_db():
 async def get_session() -> AsyncSession:
     """Получение сессии для работы с БД"""
     async with async_session() as session:
-        yield session
+        return session
 
 
 async def add_main_admin():
@@ -145,7 +146,7 @@ async def add_channel(channel_id: int, channel_name: str,
     """Добавление канала"""
     async with async_session() as session:
         try:
-            channel = Channel(
+            channel = Channel( 
                 channel_id=channel_id,
                 channel_name=channel_name,
                 channel_username=channel_username,
@@ -255,6 +256,7 @@ async def create_giveaway(title: str, description: str, message_winner: str, end
         return giveaway
 
 
+
 async def get_giveaway(giveaway_id: int) -> Optional[Giveaway]:
     """Получение розыгрыша по ID"""
     async with async_session() as session:
@@ -264,6 +266,7 @@ async def get_giveaway(giveaway_id: int) -> Optional[Giveaway]:
             .where(Giveaway.id == giveaway_id)
         )
         return result.scalar_one_or_none()
+
 
 
 async def get_active_giveaways() -> List[Giveaway]:
@@ -462,6 +465,7 @@ async def add_participant(giveaway_id: int, user_id: int,
             return False
 
 
+
 async def get_participants_count(giveaway_id: int) -> int:
     """Получение количества участников розыгрыша"""
     async with async_session() as session:
@@ -481,6 +485,7 @@ async def get_participants(giveaway_id: int) -> List[Participant]:
 
 
 # Функции для работы с победителями
+
 async def get_winners(giveaway_id: int) -> List[Winner]:
     """Получение списка победителей розыгрыша"""
     async with async_session() as session:
@@ -592,14 +597,14 @@ async def get_active_subscribers(channel_id: int, days: int = 30) -> List[Channe
     Активность — участие в розыгрыше или комментарий.
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
-    async with get_session() as session:
+    async with async_session() as session:
         stmt = select(ChannelSubscriber).where(
             ChannelSubscriber.channel_id == channel_id,
             ChannelSubscriber.left_at.is_(None),
             ChannelSubscriber.last_activity_at >= cutoff
         )
         result = await session.execute(stmt)
-        return result.scalars().all()
+        return list(result.scalars().all())
 
 
 async def remove_channel_subscriber(channel_id: int, user_id: int) -> bool:
@@ -652,7 +657,7 @@ async def get_channel_subscribers_count(channel_id: int, as_of: datetime = None)
         return result.scalar_one()
 
 
-async def get_active_subscribers(channel_id: int) -> List[ChannelSubscriber]:
+async def get_all_active_subscribers(channel_id: int) -> List[ChannelSubscriber]:
     """
     Возвращает список всех активных подписчиков канала.
     """
@@ -689,12 +694,132 @@ async def was_user_subscriber(channel_id: int, user_id: int, at_time: datetime) 
         return subscriber.left_at > at_time
 
 
+
 async def get_channel(channel_id: int) -> Optional[Channel]:
     async with async_session() as session:
         result = await session.execute(
             select(Channel)
             .options(selectinload(Channel.admin))  # ← Загружаем админа!
             .where(Channel.channel_id == channel_id)
+        )
+        return result.scalar_one_or_none()
+
+
+# Функции для работы с массовой рассылкой
+async def create_mailing(channel_id: int, admin_id: int, audience_type: str, message_text: str, total_users: int) -> Mailing:
+    """
+    Создание новой записи о рассылке.
+    
+    Args:
+        channel_id: ID канала для рассылки
+        admin_id: ID администратора, запустившего рассылку
+        audience_type: Тип аудитории ("active_30d" / "all")
+        message_text: Текст сообщения для рассылки
+        total_users: Общее количество пользователей в аудитории
+        
+    Returns:
+        Объект Mailing
+    """
+    async with async_session() as session:
+        mailing = Mailing(
+            channel_id=channel_id,
+            admin_id=admin_id,
+            audience_type=audience_type,
+            message_text=message_text,
+            total_users=total_users,
+            status="pending",
+            sent_count=0,
+            failed_count=0,
+            blocked_count=0
+        )
+        session.add(mailing)
+        await session.commit()
+        await session.refresh(mailing)
+        return mailing
+
+
+async def update_mailing_stats(mailing_id: int, sent: int, failed: int, blocked: int, status: str):
+    """
+    Обновление статистики и статуса рассылки.
+    
+    Args:
+        mailing_id: ID рассылки
+        sent: Количество отправленных сообщений
+        failed: Количество неудачных попыток
+        blocked: Количество пользователей, заблокировавших бота
+        status: Новый статус ("pending", "sending", "done", "cancelled")
+    """
+    async with async_session() as session:
+        await session.execute(
+            update(Mailing)
+            .where(Mailing.id == mailing_id)
+            .values(
+                sent_count=sent,
+                failed_count=failed,
+                blocked_count=blocked,
+                status=status,
+                finished_at=datetime.now() if status in ["done", "cancelled"] else None
+            )
+        )
+        await session.commit()
+
+
+
+async def get_mailing(mailing_id: int) -> Optional[Mailing]:
+    """
+    Получение информации о рассылке по ID.
+    
+    Args:
+        mailing_id: ID рассылки
+        
+    Returns:
+        Объект Mailing или None, если не найден
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Mailing).where(Mailing.id == mailing_id)
+        )
+        return result.scalar_one_or_none()
+
+
+
+async def get_mailings_by_channel(channel_id: int) -> List[Mailing]:
+    """
+    Получение всех рассылок для канала.
+    
+    Args:
+        channel_id: ID канала
+        
+    Returns:
+        Список объектов Mailing, отсортированный по дате создания (новые первыми)
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Mailing)
+            .where(Mailing.channel_id == channel_id)
+            .order_by(Mailing.created_at.desc())
+        )
+        return result.scalars().all()
+
+
+
+async def get_active_mailing(channel_id: int) -> Optional[Mailing]:
+    """
+    Проверка, есть ли активная рассылка для канала.
+    
+    Args:
+        channel_id: ID канала
+        
+    Returns:
+        Объект Mailing со статусом "sending" или None
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Mailing)
+            .where(
+                Mailing.channel_id == channel_id,
+                Mailing.status == "sending"
+            )
         )
         return result.scalar_one_or_none()
 
@@ -706,3 +831,216 @@ async def get_channel_for_discussion_group(discussion_group_id: int) -> Optional
             where(Channel.discussion_group_id == discussion_group_id)
         )
         return result.scalar_one_or_none()
+
+
+# ==================== ФУНКЦИИ ДЛЯ ПАРСИНГА ПОДПИСЧИКОВ ====================
+
+async def bulk_add_channel_subscribers(channel_id: int, subscribers: List[Dict]) -> Tuple[int, int]:
+    """
+    Массовое добавление подписчиков канала с оптимизированной batch-вставкой.
+    Обновляет существующие записи (вернувшихся пользователей).
+
+    Args:
+        channel_id: ID канала
+        subscribers: Список словарей с данными подписчиков
+                    [{"user_id": int, "username": str, "first_name": str, "last_name": str}, ...]
+
+    Returns:
+        Tuple[int, int]: (количество добавленных, количество обновленных)
+    """
+    if not subscribers:
+        return 0, 0
+
+    added_count = 0
+    updated_count = 0
+    batch_size = 100  # Оптимизированный размер batch для SQLite
+
+    async with async_session() as session:
+        try:
+            for i in range(0, len(subscribers), batch_size):
+                batch = subscribers[i:i + batch_size]
+
+                for sub_data in batch:
+                    user_id = sub_data.get("user_id")
+                    if not user_id:
+                        continue
+
+                    # Проверяем, существует ли запись
+                    result = await session.execute(
+                        select(ChannelSubscriber).where(
+                            ChannelSubscriber.channel_id == channel_id,
+                            ChannelSubscriber.user_id == user_id
+                        )
+                    )
+                    existing = result.scalar_one_or_none()
+
+                    if existing:
+                        # Пользователь уже есть в базе
+                        if existing.left_at is not None:
+                            # Пользователь отписался - обновляем как вернувшегося
+                            existing.left_at = None
+                            existing.username = sub_data.get("username")
+                            existing.first_name = sub_data.get("first_name")
+                            existing.full_name = sub_data.get("full_name")
+                            existing.added_at = datetime.now()
+                            updated_count += 1
+                        # Если уже активен - ничего не делаем (не считаем как updated)
+                    else:
+                        # Новый подписчик
+                        subscriber = ChannelSubscriber(
+                            channel_id=channel_id,
+                            user_id=user_id,
+                            username=sub_data.get("username"),
+                            first_name=sub_data.get("first_name"),
+                            full_name=sub_data.get("full_name")
+                        )
+                        session.add(subscriber)
+                        added_count += 1
+
+            await session.commit()
+            logging.info(f"Batch insert completed for channel {channel_id}: added={added_count}, updated={updated_count}")
+
+        except Exception as e:
+            await session.rollback()
+            logging.error(f"Error in bulk_add_channel_subscribers for channel {channel_id}: {e}")
+            raise
+
+    return added_count, updated_count
+
+
+
+async def get_channel_subscribers_stats(channel_id: int) -> Dict[str, int]:
+    """
+    Получение статистики по подписчикам канала.
+
+    Returns:
+        Dict с ключами:
+        - total: общее количество записей (включая отписавшихся)
+        - active: количество активных подписчиков
+        - with_username: количество с username
+        - without_username: количество без username (только активные)
+    """
+    async with async_session() as session:
+        # Общее количество записей
+        total_result = await session.execute(
+            select(func.count(ChannelSubscriber.id)).where(
+                ChannelSubscriber.channel_id == channel_id
+            )
+        )
+        total = total_result.scalar() or 0
+
+        # Активные подписчики (не отписавшиеся)
+        active_result = await session.execute(
+            select(func.count(ChannelSubscriber.id)).where(
+                ChannelSubscriber.channel_id == channel_id,
+                ChannelSubscriber.left_at.is_(None)
+            )
+        )
+        active = active_result.scalar() or 0
+
+        # Активные с username
+        with_username_result = await session.execute(
+            select(func.count(ChannelSubscriber.id)).where(
+                ChannelSubscriber.channel_id == channel_id,
+                ChannelSubscriber.left_at.is_(None),
+                ChannelSubscriber.username.isnot(None)
+            )
+        )
+        with_username = with_username_result.scalar() or 0
+
+        # Активные без username
+        without_username = active - with_username
+
+        return {
+            "total": total,
+            "active": active,
+            "with_username": with_username,
+            "without_username": without_username
+        }
+
+
+async def clear_channel_subscribers(channel_id: int) -> int:
+    """
+    Полная очистка всех данных о подписчиках канала.
+
+    Args:
+        channel_id: ID канала
+
+    Returns:
+        Количество удаленных записей
+    """
+    async with async_session() as session:
+        # Получаем количество записей для возврата
+        result = await session.execute(
+            select(func.count(ChannelSubscriber.id)).where(
+                ChannelSubscriber.channel_id == channel_id
+            )
+        )
+        count = result.scalar() or 0
+
+        # Удаляем все записи
+        await session.execute(
+            delete(ChannelSubscriber).where(
+                ChannelSubscriber.channel_id == channel_id
+            )
+        )
+        await session.commit()
+
+        logging.info(f"Cleared {count} subscribers for channel {channel_id}")
+        return count
+
+
+async def update_existing_subscribers(channel_id: int, subscribers: List[Dict]) -> int:
+    """
+    Обновление данных существующих активных подписчиков канала.
+    В отличие от bulk_add, не добавляет новых подписчиков.
+
+    Args:
+        channel_id: ID канала
+        subscribers: Список словарей с данными подписчиков
+
+    Returns:
+        Количество обновленных записей
+    """
+    if not subscribers:
+        return 0
+
+    updated_count = 0
+    batch_size = 100
+
+    async with async_session() as session:
+        try:
+            for i in range(0, len(subscribers), batch_size):
+                batch = subscribers[i:i + batch_size]
+
+                for sub_data in batch:
+                    user_id = sub_data.get("user_id")
+                    if not user_id:
+                        continue
+
+                    result = await session.execute(
+                        select(ChannelSubscriber).where(
+                            ChannelSubscriber.channel_id == channel_id,
+                            ChannelSubscriber.user_id == user_id,
+                            ChannelSubscriber.left_at.is_(None)  # Только активные
+                        )
+                    )
+                    existing = result.scalar_one_or_none()
+
+                    if existing:
+                        # Обновляем данные
+                        existing.username = sub_data.get("username")
+                        existing.first_name = sub_data.get("first_name")
+                        existing.full_name = sub_data.get("full_name")
+                        updated_count += 1
+
+            await session.commit()
+            logging.info(f"Updated {updated_count} existing subscribers for channel {channel_id}")
+
+        except Exception as e:
+            await session.rollback()
+            logging.error(f"Error in update_existing_subscribers for channel {channel_id}: {e}")
+            raise
+
+    return updated_count
+

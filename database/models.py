@@ -103,6 +103,10 @@ class Giveaway(Base):
     channel = relationship("Channel", backref="giveaways")
     creator = relationship("Admin", backref="created_giveaways")
 
+    @property
+    def participants_count(self) -> int:
+        return len(self.participants) if hasattr(self, 'participants') else 0
+
 
 class Participant(Base):
     """Модель участников розыгрыша"""
@@ -147,3 +151,35 @@ class Winner(Base):
     )
 
 
+class MailingStatus(Enum):
+    """Статусы массовой рассылки"""
+    PENDING = "pending"     # Ожидает запуска
+    SENDING = "sending"     # В процессе отправки
+    DONE = "done"           # Завершена
+    CANCELLED = "cancelled" # Отменена
+
+
+class Mailing(Base):
+    """Модель массовой рассылки"""
+    __tablename__ = "mailings"
+
+    id = Column(Integer, primary_key=True)
+    channel_id = Column(BigInteger, ForeignKey('channels.channel_id'), nullable=False) # Канал, из которого берется аудитория
+    admin_id = Column(BigInteger, ForeignKey('admins.user_id'), nullable=False)       # Кто запустил рассылку
+    audience_type = Column(String(50), nullable=False) # "active_30d" / "all"
+
+    message_text = Column(Text, nullable=False) # Текст рассылки
+
+    total_users = Column(Integer, nullable=False) # Общее количество пользователей для рассылки
+    sent_count = Column(Integer, default=0)       # Сколько отправлено успешно
+    failed_count = Column(Integer, default=0)     # Сколько не удалось отправить (без blocked)
+    blocked_count = Column(Integer, default=0)    # Сколько заблокировало бота
+
+    status = Column(String(20), default=MailingStatus.PENDING.value)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True) # Время завершения/отмены рассылки
+
+    # Связи
+    channel = relationship("Channel", backref="mailings")
+    admin = relationship("Admin", backref="started_mailings")

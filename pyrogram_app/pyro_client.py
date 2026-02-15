@@ -1,6 +1,10 @@
 from pyrogram import Client
-from pyrogram.raw.types import UpdateMessageReactions
+from pyrogram.handlers import RawUpdateHandler
+from pyrogram.raw.types import UpdateMessageReactions, PeerChannel
+from pyrogram.raw.functions.messages import GetMessageReactionsList
 import logging
+
+from database.database import update_last_activity
 
 
 class PyrogramClient:
@@ -16,7 +20,7 @@ class PyrogramClient:
         self.is_running = False
 
         # Подписываемся на raw-обновления
-        self.app.add_handler(self.on_raw_update, group=0)
+        self.app.add_handler(RawUpdateHandler(self.on_raw_update), group=0)
 
     async def start(self):
         """Запуск Pyrogram клиента"""
@@ -65,28 +69,63 @@ class PyrogramClient:
     async def on_raw_update(self, client: Client, update, users, chats):
         """
         Обработчик 'сырых' обновлений — ловим изменения реакций.
+        При получении UpdateMessageReactions запрашиваем список
+        реагировавших через GetMessageReactionsList (доступно админам канала).
         """
-        logging.debug(f"🔍 Обработка raw_update: {type(update)}")
+        update_type = type(update).__name__
+
+        if not isinstance(update, UpdateMessageReactions):
+            return
+
         try:
-            if isinstance(update, UpdateMessageReactions):
-                chat_id = int(f"-100{update.peer.channel_id}") if hasattr(update.peer, 'channel_id') else update.peer.user_id
-                message_id = update.msg_id
-                reactions = update.reactions
+            peer = update.peer
+            message_id = update.msg_id
 
-                reacted_users = []
-                for r in reactions.results:
-                    if hasattr(r, 'peer_ids') and r.peer_ids:
-                        reacted_users.extend([peer_id.user_id for peer_id in r.peer_ids])
+            if not hasattr(peer, 'channel_id'):
+                logging.debug(f"Реакция не в канале, пропускаю: {peer}")
+                return
 
-                logging.info(
-                    f"🔄 Обновление реакций: чат={chat_id}, сообщение={message_id}, "
-                    f"реакции={len(reacted_users)} пользователей"
+            channel_id = peer.channel_id
+            chat_id = int(f"-100{channel_id}")
+            logging.info(f"🎯 UpdateMessageReactions: chat_id={chat_id}, msg_id={message_id}")
+
+            # Запрашиваем полный список пользователей через MTProto API
+            result = await client.invoke(
+                GetMessageReactionsList(
+                    peer=PeerChannel(channel_id=channel_id),
+                    id=message_id,
+                    limit=100,
                 )
-                for user_id in reacted_users:
-                    logging.info(f"✅ Пользователь {user_id} проявил активность в сообщении {message_id}")
+            )
+
+            logging.info(f"   GetMessageReactionsList: получено {len(result.reactions)} реакций")
+
+            for reaction in result.reactions:
+                user_id = reaction.peer_id.user_id if hasattr(reaction.peer_id, 'user_id') else None
+                if not user_id:
+                    continue
+
+                # Ищем данные пользователя в ответе
+                user_data = next((u for u in result.users if u.id == user_id), None)
+                username = getattr(user_data, 'username', None) if user_data else None
+                first_name = getattr(user_data, 'first_name', None) if user_data else None
+                last_name = getattr(user_data, 'last_name', None) if user_data else None
+                full_name = f"{first_name or ''} {last_name or ''}".strip() or None
+
+                await update_last_activity(
+                    channel_id=chat_id,
+                    user_id=user_id,
+                    username=username,
+                    first_name=first_name,
+                    full_name=full_name,
+                )
+                logging.info(f"✅ Реакция сохранена: user_id={user_id}, username={username}, канал={chat_id}")
+
+            if not result.reactions:
+                logging.info(f"   Список реакций пуст для сообщения {message_id}")
 
         except Exception as e:
-            logging.error(f"❌ Ошибка в обработчике raw_update (реакции): {e}")
+            logging.error(f"❌ Ошибка обработки реакций: {e}", exc_info=True)
 
     async def export(self):
         """Возвращает внутренний экземпляр Client (если нужно)"""

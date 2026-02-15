@@ -20,6 +20,7 @@ class CreateGiveawayStates(StatesGroup):
 
 class EditGiveawayStates(StatesGroup):
     """Состояния для редактирования розыгрыша"""
+    MAIN = State() # Добавлено основное состояние для редактирования
     CHOOSING_GIVEAWAY = State()     # Выбор розыгрыша для редактирования
     CHOOSING_FIELD = State()        # Выбор поля для редактирования
     WAITING_NEW_TITLE = State()     # Новый заголовок
@@ -55,5 +56,50 @@ class ViewGiveawaysStates(StatesGroup):
     CHOOSING_TYPE = State()         # Выбор типа (активные/завершенные)
     VIEWING_LIST = State()          # Просмотр списка
     VIEWING_DETAILS = State()       # Просмотр деталей конкретного розыгрыша
+    VIEWING_ACTIVE = State()        # Просмотр активных розыгрышей
+    VIEWING_FINISHED = State()      # Просмотр завершённых розыгрышей
+    VIEWING_FINISHED_DETAILS = State()  # Детали завершённого розыгрыша
+    VIEWING_ACTIVE_DETAILS = State()    # Детали активного розыгрыша
+    EDITING_TITLE = State()             # Редактирование заголовка
+    EDITING_DESCRIPTION = State()       # Редактирование описания
+    EDITING_END_TIME = State()          # Редактирование времени окончания
+    EDITING_MESSAGE_WINNER = State()    # Редактирование сообщения победителям
 
 
+class ChannelParsingStates(StatesGroup):
+    """Состояния для парсинга подписчиков канала"""
+    PARSING_CHANNEL = State()           # Парсинг выполняется
+    PARSING_CANCELLED = State()         # Парсинг отменён
+    PARSING_COMPLETE = State()          # Парсинг завершён (просмотр результатов)
+    VIEWING_PARSING_STATS = State()     # Просмотр статистики парсинга
+
+
+class AdminDialogStates(StatesGroup):
+    """Состояния диалога управления администраторами (aiogram-dialog)."""
+    MAIN_MENU = State()
+    VIEW_ADMINS = State()
+    ADD_ADMIN_ID = State()
+    CHOOSE_ADMIN_TO_REMOVE = State()
+
+
+class ChannelDialogStates(StatesGroup):
+    """Состояния диалога управления каналами (aiogram-dialog)."""
+    MAIN_MENU = State()
+    ADD_BY_LINK = State()
+    ADD_BY_FORWARD = State()
+    CHOOSE_CHANNEL_TO_REMOVE = State()
+    VIEW_CHANNELS_LIST = State()
+    VIEW_CHANNEL_INFO = State()
+    ASK_PARSE = State()
+    PARSING_IN_PROGRESS = State()
+    PARSING_COMPLETE = State()
+
+
+class MailingStates(StatesGroup):
+    """Состояния для массовой рассылки"""
+    SELECT_CHANNEL = State()      # выбор канала
+    SELECT_AUDIENCE = State()     # выбор аудитории (активные / все)
+    INPUT_MESSAGE = State()       # ввод текста сообщения
+    PREVIEW = State()             # превью + подтверждение
+    SENDING = State()             # процесс рассылки с прогрессом
+    DONE = State()                # итоговая статистика

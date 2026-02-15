@@ -1,1 +1,1 @@
-# Database package
+from .database import *
