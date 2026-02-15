@@ -1,195 +1,226 @@
-# Документация для модулей database
+# Модуль database
 
-## Структура проекта
-```
-database/
-├── database.py    # Функции для работы с базой данных
-└── models.py      # Модели SQLAlchemy для ORM
-```
+Модуль `database` реализует слой хранения данных на основе **SQLAlchemy Async ORM**. По умолчанию используется SQLite (через `aiosqlite`), но поддерживаются PostgreSQL и MySQL. Таблицы создаются автоматически при старте через `init_db()` — миграции не используются.
 
-## models.py - Модели базы данных
+## Структура модуля
 
-### GiveawayStatus (Enum)
-Перечисление статусов розыгрыша.
+- `models.py` — ORM-модели и перечисления (Enum)
+- `database.py` — все асинхронные функции для работы с БД
 
-- `ACTIVE` - активный розыгрыш
-- `FINISHED` - завершенный розыгрыш
-- `CANCELLED` - отмененный розыгрыш
-
-### ChannelSubscriber
-Модель подписчиков каналов для сбора статистики.
-
-**Поля:**
-- `id` - первичный ключ
-- `channel_id` - ID канала в Telegram
-- `user_id` - Telegram ID пользователя
-- `username` - username пользователя в Telegram
-- `first_name` - имя пользователя в Telegram
-- `added_at` - дата и время добавления в канал
-- `left_at` - дата и время отписки от канала (NULL если все еще подписан)
-
-**Ограничения:**
-- Уникальное ограничение по комбинации `channel_id` и `user_id` - один пользователь может быть записан как подписчик канала только один раз
-
-**Таблица:** `channel_subscribers`
+## Модели (`models.py`)
 
 ### Admin
-Модель администраторов бота.
 
-**Поля:**
-- `id` - первичный ключ
-- `user_id` - Telegram ID пользователя (уникальный)
-- `username` - username в Telegram
-- `first_name` - имя в Telegram
-- `is_main_admin` - флаг главного администратора
-- `created_at` - дата создания записи
+Администраторы бота.
 
-**Связи:**
-- `channels` - список каналов, добавленных админом (обратная связь)
-- `created_giveaways` - список розыгрышей, созданных админом (обратная связь)
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `id` | Integer, PK | Автоинкремент |
+| `user_id` | BigInteger, unique | Telegram User ID |
+| `username` | String(255) | Username в Telegram |
+| `first_name` | String(255) | Имя |
+| `full_name` | String(255) | Полное имя |
+| `is_main_admin` | Boolean | Главный администратор (неудаляемый) |
+| `created_at` | DateTime | Дата добавления |
 
 ### Channel
-Модель Telegram-каналов для проведения розыгрышей.
 
-**Поля:**
-- `id` - первичный ключ
-- `channel_id` - Telegram ID канала (уникальный)
-- `channel_name` - название канала
-- `channel_username` - username канала (@username)
-- `added_by` - ID администратора, добавившего канал
-- `created_at` - дата добавления
+Telegram-каналы, подключённые к боту.
 
-**Связи:**
-- `admin` - администратор, добавивший канал
-- `giveaways` - список розыгрышей в этом канале (обратная связь)
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `id` | Integer, PK | Автоинкремент |
+| `channel_id` | BigInteger, unique | Telegram Channel ID |
+| `channel_name` | String(255) | Название канала |
+| `channel_username` | String(255) | @username канала |
+| `added_by` | BigInteger, FK → admins.user_id | Кто добавил |
+| `discussion_group_id` | Integer | ID привязанной группы обсуждений |
+| `created_at` | DateTime | Дата добавления |
+
+**Связи:** `admin` (Admin), `giveaways` (Giveaway[]), `mailings` (Mailing[])
+
+### ChannelSubscriber
+
+Подписчики каналов (отслеживаются пока бот является админом канала).
+
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `id` | Integer, PK | Автоинкремент |
+| `channel_id` | BigInteger | ID канала |
+| `user_id` | BigInteger | Telegram ID пользователя |
+| `username` | String(255) | Username |
+| `full_name` | String(255) | Полное имя |
+| `first_name` | String(255) | Имя |
+| `added_at` | DateTime | Время добавления/подписки |
+| `left_at` | DateTime | Время отписки (NULL = активен) |
+| `last_activity_at` | DateTime | Дата последней активности (комментарий, реакция) |
+
+**Ограничение:** `UniqueConstraint('channel_id', 'user_id')` — один пользователь, одна запись на канал.
 
 ### Giveaway
-Модель розыгрыша.
 
-**Поля:**
-- `id` - первичный ключ
-- `title` - заголовок розыгрыша
-- `description` - описание розыгрыша
-- `media_type` - тип медиа (photo, video, animation, document)
-- `media_file_id` - file_id медиа в Telegram
-- `channel_id` - ID канала для розыгрыша
-- `message_id` - ID сообщения с розыгрышем в канале
-- `start_time` - время начала
-- `end_time` - время окончания
-- `status` - статус розыгрыша (ACTIVE, FINISHED, CANCELLED)
-- `winner_places` - количество призовых мест
-- `created_by` - ID создателя (админа)
-- `created_at` - дата создания
-- `updated_at` - дата последнего обновления
+Розыгрыши.
 
-**Связи:**
-- `channel` - канал, в котором проводится розыгрыш
-- `creator` - создатель розыгрыша
-- `participants` - список участников (обратная связь)
-- `winners` - список победителей (обратная связь)
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `id` | Integer, PK | Автоинкремент |
+| `title` | String(255) | Заголовок |
+| `description` | Text | Описание |
+| `message_winner` | Text | Персональное сообщение победителям |
+| `media_type` | String(50) | Тип медиа: photo, video, animation, document |
+| `media_file_id` | String(255) | Telegram file_id |
+| `channel_id` | BigInteger, FK → channels.channel_id | Канал публикации |
+| `message_id` | BigInteger | ID сообщения в канале |
+| `start_time` | DateTime | Время создания |
+| `end_time` | DateTime | Время окончания |
+| `status` | String(20) | Статус: active, finished, cancelled |
+| `winner_places` | Integer | Количество призовых мест |
+| `created_by` | BigInteger, FK → admins.user_id | Создатель |
+| `created_at` | DateTime | Дата создания |
+| `updated_at` | DateTime | Дата обновления (auto) |
+
+**Связи:** `channel` (Channel), `creator` (Admin), `participants` (Participant[]), `winners` (Winner[])
+
+**Свойства:** `participants_count` — количество участников.
 
 ### Participant
-Модель участника розыгрыша.
 
-**Поля:**
-- `id` - первичный ключ
-- `giveaway_id` - ID розыгрыша
-- `user_id` - Telegram ID участника
-- `username` - username участника
-- `first_name` - имя участника
-- `joined_at` - дата участия
+Участники розыгрышей.
 
-**Связи:**
-- `giveaway` - розыгрыш, в котором участвует пользователь
-
-**Ограничения:**
-- Уникальный индекс: один пользователь может участвовать в одном розыгрыше только один раз
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `id` | Integer, PK | Автоинкремент |
+| `giveaway_id` | Integer, FK → giveaways.id | Розыгрыш |
+| `user_id` | BigInteger | Telegram ID |
+| `username` | String(255) | Username |
+| `first_name` | String(255) | Имя |
+| `full_name` | String(255) | Полное имя |
+| `joined_at` | DateTime | Время участия |
 
 ### Winner
-Модель победителя розыгрыша.
 
-**Поля:**
-- `id` - первичный ключ
-- `giveaway_id` - ID розыгрыша
-- `user_id` - Telegram ID победителя
-- `username` - username победителя
-- `first_name` - имя победителя
-- `place` - место (1, 2, 3...)
-- `won_at` - дата выигрыша
+Победители розыгрышей.
 
-**Связи:**
-- `giveaway` - розыгрыш, в котором выигран приз
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `id` | Integer, PK | Автоинкремент |
+| `giveaway_id` | Integer, FK → giveaways.id | Розыгрыш |
+| `user_id` | BigInteger | Telegram ID |
+| `username` | String(255) | Username |
+| `first_name` | String(255) | Имя |
+| `full_name` | String(255) | Полное имя |
+| `place` | Integer | Место (1, 2, 3...) |
+| `won_at` | DateTime | Время победы |
 
-**Ограничения:**
-- Уникальный индекс: одно место в одном розыгрыше может быть занято только одним пользователем
+### Mailing
 
-## database.py - Функции работы с базой данных
+Массовые рассылки.
 
-### Инициализация и сессии
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `id` | Integer, PK | Автоинкремент |
+| `channel_id` | BigInteger, FK → channels.channel_id | Канал-источник аудитории |
+| `admin_id` | BigInteger, FK → admins.user_id | Кто запустил |
+| `audience_type` | String(50) | Тип аудитории: "active_30d" / "all" |
+| `message_text` | Text | Текст рассылки |
+| `total_users` | Integer | Всего пользователей |
+| `sent_count` | Integer | Успешно отправлено |
+| `failed_count` | Integer | Неудачные попытки |
+| `blocked_count` | Integer | Заблокировали бота |
+| `status` | String(20) | Статус: pending, sending, done, cancelled |
+| `created_at` | DateTime | Дата создания |
+| `finished_at` | DateTime | Дата завершения/отмены |
 
-- `engine` - асинхронный движок SQLAlchemy
-- `async_session` - фабрика асинхронных сессий
-- `init_db()` - инициализация БД и создание таблиц
-- `get_session()` - генератор сессий для использования в зависимостях FastAPI
+### Перечисления
 
-### Функции для работы с администраторами
+- **`GiveawayStatus`** — `ACTIVE`, `FINISHED`, `CANCELLED`
+- **`MailingStatus`** — `PENDING`, `SENDING`, `DONE`, `CANCELLED`
 
-- `is_admin(user_id: int) -> bool` - проверка, является ли пользователь админом
-- `add_admin(user_id: int, username: str = None, first_name: str = None) -> bool` - добавление нового админа
-- `remove_admin(user_id: int) -> bool` - удаление админа (кроме главного)
-- `get_all_admins() -> List[Admin]` - получение всех админов
-- `update_admin_profile(user) -> None` - обновление профиля админа по данным Telegram
+## Функции (`database.py`)
 
-### Функции для работы с каналами
+### Инициализация
 
-- `add_channel(channel_id: int, channel_name: str, channel_username: str = None, added_by: int = None) -> bool` - добавление канала
-- `add_channel_by_username(channel_username: str, bot, added_by: int = None) -> tuple[bool, str]` - добавление канала по username с проверкой прав бота
-- `get_all_channels() -> List[Channel]` - получение всех каналов со связанными админами
-- `remove_channel(channel_id: int) -> bool` - удаление канала
+- `init_db()` — создание таблиц и добавление главного админа
+- `get_session()` — получение `AsyncSession`
+- `add_main_admin()` — создание главного админа из `config.MAIN_ADMIN_ID`
 
-### Функции для работы с розыгрышами
+### Администраторы
 
-- `create_giveaway(title: str, description: str, end_time, channel_id: int, created_by: int, winner_places: int = 1, media_type: str = None, media_file_id: str = None) -> Optional[Giveaway]` - создание нового розыгрыша
-- `get_giveaway(giveaway_id: int) -> Optional[Giveaway]` - получение розыгрыша по ID со связями
-- `get_active_giveaways() -> List[Giveaway]` - получение активных розыгрышей
-- `get_finished_giveaways() -> List[Giveaway]` - получение завершенных розыгрышей
-- `get_finished_giveaways_page(page: int, page_size: int) -> List[Giveaway]` - пагинация завершенных розыгрышей
-- `count_finished_giveaways() -> int` - подсчет количества завершенных розыгрышей
-- `delete_finished_older_than(days: int) -> int` - удаление розыгрышей, завершенных более N дней назад
-- `update_giveaway_message_id(giveaway_id: int, message_id: int)` - обновление ID сообщения розыгрыша
-- `update_giveaway_fields(giveaway_id: int, **fields) -> Optional[Giveaway]` - обновление произвольных полей розыгрыша
-- `finish_giveaway(giveaway_id: int, winners_data: List[dict] = None)` - завершение розыгрыша и добавление победителей
-- `delete_giveaway(giveaway_id: int) -> bool` - полное удаление розыгрыша (включая участников и победителей)
+- `is_admin(user_id) → bool` — проверка статуса администратора
+- `add_admin(user_id, username, first_name, full_name) → bool` — добавление админа
+- `remove_admin(user_id) → bool` — удаление (кроме главного)
+- `get_all_admins() → List[Admin]` — список всех админов
+- `update_admin_profile(user)` — обновление профиля по данным Telegram
 
-### Функции для работы с участниками
+### Каналы
 
-- `add_participant(giveaway_id: int, user_id: int, username: str = None, first_name: str = None) -> bool` - добавление участника в розыгрыш
-- `get_participants_count(giveaway_id: int) -> int` - получение количества участников
-- `get_participants(giveaway_id: int) -> List[Participant]` - получение всех участников розыгрыша
+- `add_channel(channel_id, channel_name, ...) → bool` — добавление канала
+- `add_channel_by_username(username, bot, added_by) → (bool, str)` — добавление по username с проверкой прав бота и автоопределением группы обсуждений
+- `get_all_channels() → List[Channel]` — все каналы
+- `get_channel(channel_id) → Channel` — канал по ID
+- `remove_channel(channel_id) → bool` — удаление канала
+- `get_channel_for_discussion_group(discussion_group_id) → Channel` — поиск канала по ID группы обсуждений
 
-### Функции для работы с подписчиками каналов
+### Розыгрыши
 
-- `add_channel_subscriber(channel_id: int, user_id: int, username: str = None, first_name: str = None)` - добавление пользователя как подписчика канала. Если запись уже есть с `left_at`, обновляет её (считает повторную подписку). Возвращает False если пользователь уже подписан или при ошибке.
-- `remove_channel_subscriber(channel_id: int, user_id: int) -> bool` - отмечает пользователя как отписавшегося от канала (устанавливает `left_at`). Возвращает True при успехе.
-- `get_channel_subscribers_count(channel_id: int, as_of: datetime = None) -> int` - получает количество активных подписчиков канала на указанную дату/время. Если `as_of` не указан — возвращает текущее количество.
-- `get_active_subscribers(channel_id: int) -> List[ChannelSubscriber]` - возвращает список всех активных подписчиков канала (у которых `left_at` is NULL).
-- `was_user_subscriber(channel_id: int, user_id: int, at_time: datetime) -> bool` - проверяет, был ли пользователь подписчиком канала на определённый момент времени.
+- `create_giveaway(title, description, message_winner, end_time, channel_id, ...) → Giveaway` — создание розыгрыша
+- `get_giveaway(giveaway_id) → Giveaway` — получение с загрузкой связей (channel, participants)
+- `get_active_giveaways() → List[Giveaway]` — активные розыгрыши
+- `get_finished_giveaways() → List[Giveaway]` — завершённые розыгрыши
+- `get_finished_giveaways_page(page, page_size) → List[Giveaway]` — пагинация завершённых
+- `count_finished_giveaways() → int` — количество завершённых
+- `update_giveaway_message_id(giveaway_id, message_id)` — обновление ID сообщения в канале
+- `update_giveaway_fields(giveaway_id, **fields) → Giveaway` — обновление произвольных полей (title, description, end_time, message_winner и др.)
+- `finish_giveaway(giveaway_id, winners_data)` — завершение с записью победителей
+- `delete_giveaway(giveaway_id) → bool` — каскадное удаление (участники → победители → розыгрыш)
+- `delete_finished_older_than(days) → int` — очистка старых завершённых розыгрышей
 
-### Функции для работы с победителями
+### Участники
 
-- `get_winners(giveaway_id: int) -> List[Winner]` - получение победителей розыгрыша, отсортированных по местам
-- `add_winner(giveaway_id: int, user_id: int, place: int, username: str = None, first_name: str = None) -> bool` - добавление победителя
+- `add_participant(giveaway_id, user_id, ...) → bool` — добавление участника (с проверкой дубликатов)
+- `get_participants(giveaway_id) → List[Participant]` — список участников
+- `get_participants_count(giveaway_id) → int` — количество участников
 
-## Использование
+### Победители
 
-Модули используются вместе для асинхронной работы с базой данных SQLite через SQLAlchemy ORM. Основные принципы:
+- `add_winner(giveaway_id, user_id, place, ...) → bool` — добавление победителя
+- `get_winners(giveaway_id) → List[Winner]` — список победителей (отсортированы по месту)
 
-1. Все функции асинхронные и используют `async/await`
-2. Для инициализации БД вызывается `init_db()`
-3. Для работы с данными используются контекстные менеджеры сессий
-4. Модели связаны между собой через relationships для удобного доступа к связанным данным
-5. При удалении розыгрыша автоматически удаляются связанные участники и победители
-6. При добавлении канала по username выполняется проверка существования канала и прав бота
-7. Усовершенствованная модель ChannelSubscriber позволяет собирать детальную статистику по подписчикам каналов, включая отслеживание отписок и историю подписок во времени
+### Подписчики каналов
 
-Документация создана на основе анализа кода от 2026-02-02.
+- `add_channel_subscriber(channel_id, user_id, ...) → bool` — добавление подписчика (обработка повторной подписки)
+- `remove_channel_subscriber(channel_id, user_id) → bool` — отметка отписки (устанавливает `left_at`)
+- `update_last_activity(channel_id, user_id, ...)` — обновление даты активности; если подписчика нет — создаёт запись
+- `get_active_subscribers(channel_id, days) → List[ChannelSubscriber]` — подписчики, активные за последние N дней
+- `get_all_active_subscribers(channel_id) → List[ChannelSubscriber]` — все активные подписчики
+- `get_channel_subscribers_count(channel_id, as_of) → int` — количество активных подписчиков (опционально на конкретную дату)
+- `was_user_subscriber(channel_id, user_id, at_time) → bool` — был ли подписчиком на момент времени
+- `get_channel_subscribers_stats(channel_id) → Dict` — статистика: total, active, with_username, without_username
+- `bulk_add_channel_subscribers(channel_id, subscribers) → (added, updated)` — массовое добавление (batch по 100)
+- `update_existing_subscribers(channel_id, subscribers) → int` — обновление данных существующих подписчиков
+- `clear_channel_subscribers(channel_id) → int` — полная очистка подписчиков канала
+
+### Массовая рассылка
+
+- `create_mailing(channel_id, admin_id, audience_type, message_text, total_users) → Mailing` — создание записи о рассылке
+- `update_mailing_stats(mailing_id, sent, failed, blocked, status)` — обновление статистики и статуса
+- `get_mailing(mailing_id) → Mailing` — получение рассылки по ID
+- `get_mailings_by_channel(channel_id) → List[Mailing]` — все рассылки канала (новые первыми)
+- `get_active_mailing(channel_id) → Mailing` — активная рассылка канала (статус "sending")
+
+## Конфигурация подключения
+
+```python
+# config.py
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///giveaway_bot.db")
+```
+
+Движок автоматически преобразует `sqlite://` в `sqlite+aiosqlite://` для асинхронной работы. Для PostgreSQL: `postgresql+asyncpg://...`, для MySQL: `mysql+aiomysql://...`.
+
+## Зависимости
+
+- `sqlalchemy` — ORM и построитель запросов
+- `aiosqlite` — асинхронный SQLite драйвер
+- `config` — переменные окружения (DATABASE_URL, MAIN_ADMIN_ID)
+
+Документация создана на основе анализа кода от 2026-02-15.

@@ -22,7 +22,7 @@ async def main():
     """Основная функция запуска бота"""
     # Настройка логирования
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler('bot.log', encoding='utf-8'),
@@ -37,6 +37,7 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+    logging.getLogger("pyrogram.session").setLevel(logging.ERROR)
 
     # Устанавливаем команды бота
     try:

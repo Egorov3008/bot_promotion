@@ -389,6 +389,98 @@ class ParsingMode:
             self.logger.error(f"Ошибка получения инфо о канале: {e}")
             return None
     
+    async def parse_full_batched(
+        self,
+        channel_id: int,
+        batch_size: int = 200,
+        progress_callback: Optional[Callable] = None,
+    ) -> Tuple[List[Dict], ParsingStats]:
+        """
+        Полный парсинг с батчевой обработкой, прогрессом и возможностью отмены.
+
+        Args:
+            channel_id: ID канала
+            batch_size: Размер пакета (по умолчанию 200 — размер страницы API)
+            progress_callback: async callback(stats, total) для обновления прогресса
+
+        Returns:
+            Tuple[List[Dict], ParsingStats]: (список подписчиков, статистика)
+        """
+        self._stop_event.clear()
+        stats = ParsingStats(start_time=datetime.now())
+        subscribers: List[Dict] = []
+
+        total = await self.get_channel_members_count(channel_id)
+        self.logger.info(
+            f"Начинаем батчевый парсинг канала {channel_id}, "
+            f"всего участников: {total}"
+        )
+
+        try:
+            async for member in self.client.get_chat_members(chat_id=channel_id):
+                if self._stop_event.is_set():
+                    self.logger.info("Парсинг остановлен по запросу")
+                    break
+
+                user = member.user
+
+                if user.is_bot:
+                    stats.bots_count += 1
+                    stats.total_processed += 1
+                else:
+                    subscriber = {
+                        "user_id": user.id,
+                        "first_name": user.first_name or "",
+                        "last_name": user.last_name or "",
+                        "username": user.username,
+                    }
+                    subscribers.append(subscriber)
+                    stats.total_processed += 1
+                    if user.username:
+                        stats.with_username += 1
+                    else:
+                        stats.without_username += 1
+
+                # Каждые batch_size — прогресс, проверка стопа, пауза
+                if stats.total_processed % batch_size == 0:
+                    if progress_callback:
+                        try:
+                            await progress_callback(stats, total)
+                        except Exception as e:
+                            self.logger.warning(f"Ошибка в progress_callback: {e}")
+
+                    if self._stop_event.is_set():
+                        self.logger.info("Парсинг остановлен по запросу")
+                        break
+
+                    await asyncio.sleep(1)
+
+        except FloodWait as e:
+            self.logger.warning(f"FloodWait: ожидание {e.value} сек")
+            await asyncio.sleep(e.value + 1)
+            # Возвращаем то что успели собрать
+        except Exception as e:
+            self.logger.error(f"Ошибка при батчевом парсинге: {e}")
+            stats.end_time = datetime.now()
+            raise
+
+        stats.end_time = datetime.now()
+
+        self.logger.info(
+            f"Батчевый парсинг канала {channel_id} завершён: "
+            f"собрано={len(subscribers)}, ботов={stats.bots_count}, "
+            f"обработано={stats.total_processed}"
+        )
+
+        # Финальный callback
+        if progress_callback:
+            try:
+                await progress_callback(stats, total)
+            except Exception:
+                pass
+
+        return subscribers, stats
+
     def stop(self):
         """Остановка фоновых задач парсинга"""
         self._stop_event.set()

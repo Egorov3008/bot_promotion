@@ -1,7 +1,7 @@
 """
 Диалоги редактирования и удаления розыгрышей.
 
-Переносит логику EditGiveawayStates из handlers/giveaway_handlers.py:
+Логика EditGiveawayStates:
 - выбор поля (заголовок, описание, медиа, время, message_winner);
 - обновление полей через update_giveaway_fields и переопубликование поста;
 - удаление розыгрыша (delete_giveaway, cancel_giveaway_schedule + удаление сообщения из канала).
@@ -33,7 +33,7 @@ from database.database import get_participants_count
 
 
 async def update_channel_giveaway_post(bot, giveaway) -> None:
-    """Переопубликовывает пост розыгрыша в канале, аналогично handlers/giveaway_handlers.update_channel_giveaway_post."""
+    """Переопубликовывает пост розыгрыша в канале."""
     try:
         participants_count = await get_participants_count(giveaway.id)
         from texts.messages import GIVEAWAY_POST_TEMPLATE

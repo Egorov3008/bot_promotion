@@ -21,6 +21,7 @@ from .admins import admin_management_dialog
 from .channels import channels_dialog
 from .giveaway_view import giveaway_view_dialog
 from .giveaway_edit import giveaway_edit_dialog
+from .mailing import mailing_dialog
 
 
 def register_dialogs(dp: Dispatcher) -> None:
@@ -33,4 +34,5 @@ def register_dialogs(dp: Dispatcher) -> None:
     dp.include_router(channels_dialog)
     dp.include_router(giveaway_view_dialog)
     dp.include_router(giveaway_edit_dialog)
+    dp.include_router(mailing_dialog)
 

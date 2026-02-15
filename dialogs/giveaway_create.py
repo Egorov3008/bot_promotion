@@ -1,7 +1,7 @@
 """
 Диалоги мастера создания розыгрыша на базе aiogram-dialog.
 
-Логика по шагам соответствует FSM CreateGiveawayStates из handlers/giveaway_handlers.py:
+Логика по шагам соответствует FSM CreateGiveawayStates:
 - ввод заголовка и описания;
 - ввод сообщения для победителей (message_winner);
 - загрузка/пропуск медиа;
@@ -120,11 +120,12 @@ async def channels_getter(dialog_manager: DialogManager, **kwargs) -> Dict[str, 
     return {"channels": channels}
 
 
+
 async def on_channel_selected(
-    callback: CallbackQuery,
-    widget: Select,
-    manager: DialogManager,
-    item_id: str,
+        callback: CallbackQuery,
+        widget: Select,
+        manager: DialogManager,
+        item_id: str,
 ) -> None:
     """Выбор канала для розыгрыша."""
     try:
@@ -171,13 +172,21 @@ async def on_end_time(message: Message, widget: MessageInput, manager: DialogMan
         description=description[:50] + "..." if len(description) > 50 else description,
         message_winner=message_winner[:50] + "..." if len(message_winner) > 50 else message_winner,
         winner_places=data.get("winner_places", 1),
-        channel=channel_name,
+        channel_title=channel_name,
         end_time=format_datetime(end_time),
         media=media_info,
     )
 
     manager.dialog_data["confirmation_text"] = confirmation_text
     await manager.next()
+
+
+async def confirmation_message(dialog_manager: DialogManager, **kwargs):
+    """Текст окна подтверждающего действия пользователя перед созданием голосования."""
+    confirmation_text = dialog_manager.dialog_data["confirmation_text"]
+    return {
+        'confirmation_text': confirmation_text,
+         }
 
 
 async def on_confirm_create(callback: CallbackQuery, button: Button, manager: DialogManager) -> None:
@@ -339,6 +348,6 @@ create_giveaway_dialog = Dialog(
             Button(Const(BUTTONS["cancel"]), id="cancel_create_btn", on_click=on_cancel_create),
         ),
         state=CreateGiveawayStates.CONFIRM_CREATION,
+        getter=confirmation_message
     ),
 )
-

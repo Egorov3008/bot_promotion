@@ -249,7 +249,7 @@ async def finish_giveaway_task(bot, giveaway_id: int) -> None:
             return
 
         # 🔹 Экспортируем внутренний Client и используем MailingMode
-        client = pyro_client_wrapper.export()
+        client = await pyro_client_wrapper.export()
         mailer = MailingMode(client, delay_range=(1.5, 3.0))  # Задержка между сообщениями
 
         for i, w in enumerate(winners, 1):

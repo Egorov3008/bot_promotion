@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Tuple, Dict, Tuple, Dict, Tuple
+from typing import Optional, List, Dict, Tuple
 
 from sqlalchemy import select, delete, update, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import selectinload
 
 from config import config
-from database.models import Base, Admin, Channel, Giveaway, Participant, Winner, GiveawayStatus, ChannelSubscriber
+from database.models import Base, Admin, Channel, Giveaway, Participant, Winner, GiveawayStatus, ChannelSubscriber, Mailing
 
 
 # Создаем асинхронный движок БД
@@ -36,7 +36,7 @@ async def init_db():
 async def get_session() -> AsyncSession:
     """Получение сессии для работы с БД"""
     async with async_session() as session:
-        yield session
+        return session
 
 
 async def add_main_admin():
@@ -597,14 +597,14 @@ async def get_active_subscribers(channel_id: int, days: int = 30) -> List[Channe
     Активность — участие в розыгрыше или комментарий.
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
-    async with get_session() as session:
+    async with async_session() as session:
         stmt = select(ChannelSubscriber).where(
             ChannelSubscriber.channel_id == channel_id,
             ChannelSubscriber.left_at.is_(None),
             ChannelSubscriber.last_activity_at >= cutoff
         )
         result = await session.execute(stmt)
-        return result.scalars().all()
+        return list(result.scalars().all())
 
 
 async def remove_channel_subscriber(channel_id: int, user_id: int) -> bool:
@@ -657,7 +657,7 @@ async def get_channel_subscribers_count(channel_id: int, as_of: datetime = None)
         return result.scalar_one()
 
 
-async def get_active_subscribers(channel_id: int) -> List[ChannelSubscriber]:
+async def get_all_active_subscribers(channel_id: int) -> List[ChannelSubscriber]:
     """
     Возвращает список всех активных подписчиков канала.
     """
@@ -701,6 +701,125 @@ async def get_channel(channel_id: int) -> Optional[Channel]:
             select(Channel)
             .options(selectinload(Channel.admin))  # ← Загружаем админа!
             .where(Channel.channel_id == channel_id)
+        )
+        return result.scalar_one_or_none()
+
+
+# Функции для работы с массовой рассылкой
+async def create_mailing(channel_id: int, admin_id: int, audience_type: str, message_text: str, total_users: int) -> Mailing:
+    """
+    Создание новой записи о рассылке.
+    
+    Args:
+        channel_id: ID канала для рассылки
+        admin_id: ID администратора, запустившего рассылку
+        audience_type: Тип аудитории ("active_30d" / "all")
+        message_text: Текст сообщения для рассылки
+        total_users: Общее количество пользователей в аудитории
+        
+    Returns:
+        Объект Mailing
+    """
+    async with async_session() as session:
+        mailing = Mailing(
+            channel_id=channel_id,
+            admin_id=admin_id,
+            audience_type=audience_type,
+            message_text=message_text,
+            total_users=total_users,
+            status="pending",
+            sent_count=0,
+            failed_count=0,
+            blocked_count=0
+        )
+        session.add(mailing)
+        await session.commit()
+        await session.refresh(mailing)
+        return mailing
+
+
+async def update_mailing_stats(mailing_id: int, sent: int, failed: int, blocked: int, status: str):
+    """
+    Обновление статистики и статуса рассылки.
+    
+    Args:
+        mailing_id: ID рассылки
+        sent: Количество отправленных сообщений
+        failed: Количество неудачных попыток
+        blocked: Количество пользователей, заблокировавших бота
+        status: Новый статус ("pending", "sending", "done", "cancelled")
+    """
+    async with async_session() as session:
+        await session.execute(
+            update(Mailing)
+            .where(Mailing.id == mailing_id)
+            .values(
+                sent_count=sent,
+                failed_count=failed,
+                blocked_count=blocked,
+                status=status,
+                finished_at=datetime.now() if status in ["done", "cancelled"] else None
+            )
+        )
+        await session.commit()
+
+
+
+async def get_mailing(mailing_id: int) -> Optional[Mailing]:
+    """
+    Получение информации о рассылке по ID.
+    
+    Args:
+        mailing_id: ID рассылки
+        
+    Returns:
+        Объект Mailing или None, если не найден
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Mailing).where(Mailing.id == mailing_id)
+        )
+        return result.scalar_one_or_none()
+
+
+
+async def get_mailings_by_channel(channel_id: int) -> List[Mailing]:
+    """
+    Получение всех рассылок для канала.
+    
+    Args:
+        channel_id: ID канала
+        
+    Returns:
+        Список объектов Mailing, отсортированный по дате создания (новые первыми)
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Mailing)
+            .where(Mailing.channel_id == channel_id)
+            .order_by(Mailing.created_at.desc())
+        )
+        return result.scalars().all()
+
+
+
+async def get_active_mailing(channel_id: int) -> Optional[Mailing]:
+    """
+    Проверка, есть ли активная рассылка для канала.
+    
+    Args:
+        channel_id: ID канала
+        
+    Returns:
+        Объект Mailing со статусом "sending" или None
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Mailing)
+            .where(
+                Mailing.channel_id == channel_id,
+                Mailing.status == "sending"
+            )
         )
         return result.scalar_one_or_none()
 

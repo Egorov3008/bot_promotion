@@ -54,40 +54,52 @@ class MailingMode:
         user_id: int,
         text: str,
         parse_mode: Optional[str] = None,
-        disable_web_page_preview: bool = False
+        disable_web_page_preview: bool = False,
+        max_retries: int = 3,
     ) -> Tuple[bool, str]:
         """
-        Отправка сообщения одному пользователю.
-        
+        Отправка сообщения одному пользователю с retry при FloodWait.
+
         Args:
             user_id: ID пользователя
             text: Текст сообщения
             parse_mode: Режим разметки (HTML, Markdown)
             disable_web_page_preview: Отключить превью ссылок
-        
+            max_retries: Максимальное количество повторных попыток при FloodWait
+
         Returns:
             Tuple[bool, str]: (успех, сообщение о результате)
         """
-        try:
-            await self.client.send_message(
-                chat_id=user_id,
-                text=text,
-                parse_mode=parse_mode,
-                disable_web_page_preview=disable_web_page_preview
-            )
-            return True, "SUCCESS"
-        except UserBlocked:
-            self.logger.warning(f"Пользователь {user_id} заблокировал бота.")
-            return False, "USER_BLOCKED"
-        except UserIsBlocked:
-            self.logger.warning(f"Сообщения для пользователя {user_id} заблокированы.")
-            return False, "USER_IS_BLOCKED"
-        except FloodWait as e:
-            self.logger.warning(f"Превышен лимит запросов для {user_id}. Пауза {e.value} секунд.")
-            return False, f"FLOOD_WAIT:{e.value}"
-        except Exception as e:
-            self.logger.error(f"Неизвестная ошибка при отправке сообщения {user_id}: {e}")
-            return False, f"OTHER_ERROR:{e}"
+        for attempt in range(max_retries + 1):
+            try:
+                await self.client.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview
+                )
+                return True, "SUCCESS"
+            except UserBlocked:
+                self.logger.warning(f"Пользователь {user_id} заблокировал бота.")
+                return False, "USER_BLOCKED"
+            except UserIsBlocked:
+                self.logger.warning(f"Сообщения для пользователя {user_id} заблокированы.")
+                return False, "USER_IS_BLOCKED"
+            except FloodWait as e:
+                if attempt < max_retries:
+                    self.logger.warning(
+                        f"FloodWait для {user_id}: пауза {e.value} сек (попытка {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(e.value)
+                else:
+                    self.logger.warning(
+                        f"FloodWait для {user_id}: исчерпаны попытки после {e.value} сек ожидания."
+                    )
+                    return False, f"FLOOD_WAIT:{e.value}"
+            except Exception as e:
+                self.logger.error(f"Неизвестная ошибка при отправке сообщения {user_id}: {e}")
+                return False, f"OTHER_ERROR:{e}"
+        return False, "MAX_RETRIES_EXCEEDED"
 
     async def send_bulk_messages(
         self,

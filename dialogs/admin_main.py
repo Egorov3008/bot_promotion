@@ -20,6 +20,7 @@ from states.admin_states import (
     CreateGiveawayStates,
     AdminDialogStates,
     ChannelDialogStates, ViewGiveawaysStates,
+    MailingStates
 )
 from texts.messages import MESSAGES, BUTTONS
 
@@ -55,6 +56,12 @@ async def on_view_giveaways_click(callback: CallbackQuery, button: Button, manag
     await manager.start(state=ViewGiveawaysStates.CHOOSING_TYPE, mode=StartMode.RESET_STACK)
 
 
+async def on_mailing_click(callback: CallbackQuery, button: Button, manager: DialogManager) -> None:
+    """Переход в диалог массовой рассылки."""
+    await callback.answer()
+    await manager.start(state=MailingStates.SELECT_CHANNEL, mode=StartMode.RESET_STACK)
+
+
 admin_main_dialog = Dialog(
     Window(
         Const(MESSAGES["admin_main_menu"]),
@@ -67,6 +74,9 @@ admin_main_dialog = Dialog(
         Row(
             Button(Const(BUTTONS["admin_management"]), id="admin_management_btn", on_click=on_admin_management_click),
             Button(Const(BUTTONS["channel_management"]), id="channel_management_btn", on_click=on_channel_management_click),
+        ),
+        Row(
+            Button(Const(BUTTONS["mailing_menu"]), id="mailing_menu_btn", on_click=on_mailing_click),
         ),
         state=AdminStates.MAIN_MENU,
     )

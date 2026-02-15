@@ -1,21 +1,11 @@
-import logging
-from aiogram import Dispatcher, Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram import Dispatcher, Router
+from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
 from aiogram_dialog import DialogManager, StartMode
 
-from config import config
-from texts.messages import MESSAGES
-from utils.keyboards import get_main_admin_keyboard, get_participate_keyboard
-from database.database import (
-    add_participant, get_participants_count,
-    get_giveaway, is_admin
-)
-from pyrogram_app.pyro_client import PyrogramClient
-from utils.scheduler import check_user_subscription
-
+from database.database import is_admin
 from states.admin_states import AdminStates
 
 router = Router()
@@ -59,81 +49,6 @@ async def cmd_admin(message: Message, state: FSMContext, dialog_manager: DialogM
     """Обработчик команды /admin - вход в админ-панель"""
     await state.clear()
     await dialog_manager.start(state=AdminStates.MAIN_MENU, mode=StartMode.RESET_STACK)
-
-
-@router.callback_query(F.data == "main_menu")
-async def callback_main_menu(callback: CallbackQuery, state: FSMContext):
-    """Возврат в главное меню"""
-    await state.clear()
-    await callback.message.edit_text(
-        MESSAGES["admin_main_menu"],
-        reply_markup=get_main_admin_keyboard()
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("participate_"))
-async def callback_participate(callback: CallbackQuery):
-    """Обработчик участия в розыгрыше"""
-    try:
-        # Проверка подписки на канал
-        giveaway_id = int(callback.data.split("_")[1])
-
-        # Получаем данные розыгрыша
-        giveaway = await get_giveaway(giveaway_id)
-        if not giveaway:
-            await callback.answer("❌ Розыгрыш не найден!", show_alert=True)
-            return
-            
-        if giveaway.status != "active":
-            await callback.answer(MESSAGES["giveaway_ended"], show_alert=True)
-            return
-
-        if not await check_user_subscription(callback.bot ,callback.from_user.id, giveaway.channel_id):
-            await callback.answer(
-                MESSAGES["not_subscribed"],
-                show_alert=True
-            )
-            return
-        
-        # Добавляем участника
-        user = callback.from_user
-        success = await add_participant(
-            giveaway_id=giveaway_id,
-            user_id=user.id,
-            username=user.username,
-            first_name=user.first_name,
-            full_name=user.full_name
-        )
-        
-        if success:
-            await callback.answer(MESSAGES["participation_success"], show_alert=True)
-            
-            # Обновляем счетчик участников в кнопке
-            participants_count = await get_participants_count(giveaway_id)
-            new_keyboard = get_participate_keyboard(giveaway_id, participants_count)
-            
-            try:
-                await callback.message.edit_reply_markup(reply_markup=new_keyboard)
-            except Exception as e:
-                logging.warning(f"Не удалось обновить клавиатуру: {e}")
-                
-        else:
-            await callback.answer(MESSAGES["already_participating"], show_alert=True)
-            
-    except Exception as e:
-        logging.error(f"Ошибка при участии в розыгрыше: {e}")
-        await callback.answer(MESSAGES["error_occurred"], show_alert=True)
-
-
-@router.message()
-async def handle_unknown_message(message: Message, state: FSMContext):
-    """Обработчик неизвестных сообщений — реагирует только если пользователь НЕ в FSM-состоянии"""
-    current_state = await state.get_state()
-    if current_state is None:
-        if await is_admin(message.from_user.id):
-            await message.answer(MESSAGES["unknown_command"])
-    # иначе — ничего не делаем
 
 
 def setup_basic_handlers(dp: Dispatcher):

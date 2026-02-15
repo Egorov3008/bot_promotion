@@ -54,13 +54,9 @@ async def admins_getter(dialog_manager: DialogManager, **kwargs) -> Dict[str, An
 
 
 async def on_show_admins(callback: CallbackQuery, button: Button, manager: DialogManager) -> None:
-    """Кнопка 'Список админов' — просто обновляет текст с данными из геттера."""
+    """Кнопка 'Список админов' — переход к окну со списком."""
     await callback.answer()
-    data = await admins_getter(manager)
-    await callback.message.edit_text(
-        data["admins_text"],
-        parse_mode="HTML",
-    )
+    await manager.switch_to(AdminDialogStates.VIEW_ADMINS)
 
 
 async def go_to_add_admin(callback: CallbackQuery, button: Button, manager: DialogManager) -> None:
@@ -199,6 +195,15 @@ admin_management_dialog = Dialog(
             Button(Const(BUTTONS["back_to_menu"]), id="back_to_main_admin_menu", on_click=go_back_to_main_menu),
         ),
         state=AdminDialogStates.MAIN_MENU,
+    ),
+    # Просмотр списка администраторов
+    Window(
+        Format("{admins_text}"),
+        Row(
+            Button(Const(BUTTONS["back"]), id="back_from_view_admins", on_click=lambda c, b, m: m.switch_to(AdminDialogStates.MAIN_MENU)),
+        ),
+        getter=admins_getter,
+        state=AdminDialogStates.VIEW_ADMINS,
     ),
     # Ввод ID/username нового администратора
     Window(
